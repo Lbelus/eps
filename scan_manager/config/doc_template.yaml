@@ -1,0 +1,20 @@
+documents:
+  ETFA:
+    match: "^EFTA........\\.json$"
+    parse_title: false
+    tokens:
+      - label: "cross ETFA REF"
+        patterns: 
+          - "efta"
+          - "EFTA"
+        method: "kmp"
+        extract_after: 8 
+        merge: false
+      - label: "DATE_FALLBACK"
+        patterns:
+          - "Date\\s*:?\\s*(\\d{2}/\\d{2}/\\d{4})"
+          - "Date\\s*:?\\s*(\\d{1,2}\\s+\\w+\\s+\\d{4})"
+          - "Dated\\s*:?\\s*(\\d{2}-\\d{2}-\\d{4})"
+        method: "regex"
+        group: 1
+        merge: true
