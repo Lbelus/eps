@@ -20,6 +20,7 @@ import hashlib
 import html as htmllib
 import json
 import re
+import sys
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -27,7 +28,14 @@ from urllib.parse import urlparse
 import requests
 from playwright.sync_api import sync_playwright
 
-from queries import generate_queries
+# Force line-buffered output so logs appear immediately when redirected to a file
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
+try:
+    from src.web.queries import generate_queries
+except ModuleNotFoundError:
+    from queries import generate_queries  # when run directly from src/web/
 
 # ---------------------------------------------------------------------------
 # Config
@@ -106,10 +114,14 @@ def search_page(query: str, page: int) -> tuple[list[str], int]:
     return urls, total_pages
 
 
+MAX_PAGES_PER_QUERY = 5  # 5 pages × 20 results = 100 results per query
+
+
 def collect_result_urls(query: str) -> list[str]:
-    """Fetch all result pages for a query and return deduplicated URLs."""
+    """Fetch up to MAX_PAGES_PER_QUERY result pages and return deduplicated URLs."""
     urls, total_pages = search_page(query, 1)
-    for page in range(2, total_pages + 1):
+    pages_to_fetch = min(total_pages, MAX_PAGES_PER_QUERY)
+    for page in range(2, pages_to_fetch + 1):
         time.sleep(SEARCH_DELAY)
         more, _ = search_page(query, page)
         urls.extend(more)
