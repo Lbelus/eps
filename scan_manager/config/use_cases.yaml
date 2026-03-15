@@ -222,3 +222,73 @@ documents:
         strip_spaces: true
         valid_amount: true
         merge: false
+
+
+  # ===========================================================================
+  # 8) PARSE_TITLE: split the filename itself into structured metadata fields
+  #    Requires parse_title: true on the document type.
+  #    token_finder.parse_title() splits filename (without extension) on "_".
+  #    e.g. "KMP_PO_2024_ACME.json" → ["KMP", "PO", "2024", "ACME"]
+  #    The split parts land in json_doc["metadata"]["title"] (list).
+  #    The extension lands in json_doc["metadata"]["file_extension"].
+  #    No token entries are needed to trigger this — parse_title: true is enough.
+  # ===========================================================================
+  parse_title_showcase:
+    match: "^TITLE_.*\\.json$"
+    parse_title: true
+    tokens:
+      # Regular tokens still run alongside title parsing
+      - label: "BODY_REFERENCE"
+        pattern: "Reference\\s*:?\\s*([A-Z0-9_-]+)"
+        method: "regex"
+        group: 1
+        merge: true
+
+
+  # ===========================================================================
+  # 9) EDGE CASES: guard rails and boundary conditions
+  # ===========================================================================
+  edge_cases:
+    match: "^EDGE_.*\\.json$"
+    parse_title: false
+    tokens:
+      # 9a) KMP with extract_after=0: presence marker only — pos is recorded,
+      #     values list will be empty (used to flag that a keyword exists)
+      - label: "KEYWORD_PRESENT"
+        pattern: "CONFIDENTIAL"
+        method: "kmp"
+        extract_after: 0
+        merge: false
+
+      # 9b) Regex group=0: capture the full match (no sub-group needed)
+      - label: "FULL_MATCH_CAPTURE"
+        pattern: "\\bINV-[A-Z]{2}[0-9]{4}\\b"
+        method: "regex"
+        group: 0
+        merge: false
+
+      # 9c) Fuzzy with high threshold: near-exact match only (OCR single char error)
+      - label: "STRICT_FUZZY"
+        pattern: "Total amount due :"
+        method: "fuzzy"
+        threshold: 95
+        extract_after: 20
+        merge: true
+
+      # 9d) Fuzzy with low threshold: tolerant match for heavily degraded scans
+      - label: "LOOSE_FUZZY"
+        pattern: "Observations :"
+        method: "fuzzy"
+        threshold: 70
+        extract_after: 100
+        merge: false
+
+      # 9e) valid_amount acts as a post-filter: values outside [480.0, 100000.0]
+      #     are silently discarded (value set to ""), so values list may be sparse
+      - label: "FILTERED_AMOUNT"
+        pattern: "(?<!\\d)(\\d{1,3}(?:\\s\\d{3})*[.,]\\d{2})(?![\\d.,])"
+        method: "regex"
+        group: 1
+        strip_spaces: true
+        valid_amount: true
+        merge: false
