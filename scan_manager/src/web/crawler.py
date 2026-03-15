@@ -1,49 +1,46 @@
 """
 DOJ Epstein document crawler.
 
-Search flow:
-  1. Iterate queries from queries.py
-  2. Hit search.justice.gov (no bot protection) to collect result page URLs
-  3. Use Playwright to visit each justice.gov page and extract PDF links
-     (Playwright executes the Akamai JS challenge automatically)
-  4. Download PDFs to data/input/ using the session cookies from Playwright
+Crawls the structured Epstein Library on justice.gov/epstein/doj-disclosures,
+which contains all released documents organised into data sets, court records,
+FOIA releases, and declassified files.
+
+The /multimedia-search endpoint (used by the page's search box) is blocked at
+Akamai's WAF layer for automated clients. Instead we walk the disclosure index
+directly — guaranteed to reach every document without search.
+
+Flow:
+  1. Start at /epstein/doj-disclosures and discover all sub-section URLs
+  2. Visit each sub-section with Playwright (passes Akamai JS challenge)
+  3. Collect all document download links (PDF, ZIP, etc.)
+  4. Download each file to data/input/
 
 Usage:
-    python crawler.py                     # run all generated queries
-    python crawler.py --limit 50          # stop after 50 queries
-    python crawler.py --headless false    # show browser window
-    python crawler.py --reset             # clear progress and restart
+    python -m src.web.crawler                  # full run
+    python -m src.web.crawler --headless false  # show browser window
+    python -m src.web.crawler --reset           # clear progress and restart
 """
 
 import argparse
 import hashlib
-import html as htmllib
-import json
 import re
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 from playwright.sync_api import sync_playwright
 
-# Force line-buffered output so logs appear immediately when redirected to a file
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
-
-try:
-    from src.web.queries import generate_queries
-except ModuleNotFoundError:
-    from queries import generate_queries  # when run directly from src/web/
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
-SEARCH_BASE   = "https://search.justice.gov/search"
-AFFILIATE     = "justice"
-START_URL     = "https://www.justice.gov/epstein"
+BASE_URL      = "https://www.justice.gov"
+DISCLOSURE_ROOT = "/epstein/doj-disclosures"
 
 QUEUE_IT_COOKIE_NAME  = "QueueITAccepted-SDFrts345E-V3_usdojsearch"
 QUEUE_IT_COOKIE_VALUE = (
@@ -52,28 +49,27 @@ QUEUE_IT_COOKIE_VALUE = (
     "%26Hash%3Dcda37fddf24c0964e9f6a5b41af6ef8389e78e6f0c505158790393444a0c8221"
 )
 
-DATA_DIR    = Path(__file__).resolve().parents[2] / "data"
-OUTPUT_DIR  = DATA_DIR / "input"
-SEEN_FILE   = DATA_DIR / "crawl_seen.txt"
-PDF_LOG     = DATA_DIR / "crawl_pdfs.txt"
+DATA_DIR   = Path(__file__).resolve().parents[2] / "data"
+OUTPUT_DIR = DATA_DIR / "input"
+SEEN_FILE  = DATA_DIR / "crawl_seen.txt"
+PDF_LOG    = DATA_DIR / "crawl_pdfs.txt"
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/122.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-}
+UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/122.0.0.0 Safari/537.36"
+)
+HEADERS = {"User-Agent": UA, "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"}
 
-# Seconds to wait between requests (be polite to DOJ servers)
-SEARCH_DELAY  = 0.4
-PAGE_DELAY    = 0.8
-DOWNLOAD_DELAY = 1.2
+PAGE_DELAY     = 0.8
+DOWNLOAD_DELAY = 1.0
+
+# File extensions we care about
+DOC_EXTENSIONS = re.compile(r'\.(pdf|zip|doc|docx|xls|xlsx|mp4|mov|avi)(\?[^"]*)?$', re.I)
 
 
 # ---------------------------------------------------------------------------
-# Progress tracking
+# Progress helpers
 # ---------------------------------------------------------------------------
 
 def load_set(path: Path) -> set:
@@ -81,147 +77,113 @@ def load_set(path: Path) -> set:
         return set(path.read_text(encoding="utf-8").splitlines())
     return set()
 
-
-def append_to_file(path: Path, value: str):
+def append_line(path: Path, value: str):
     with open(path, "a", encoding="utf-8") as f:
         f.write(value + "\n")
 
 
 # ---------------------------------------------------------------------------
-# Search
+# Link extraction
 # ---------------------------------------------------------------------------
 
-def _parse_results_data(html: str) -> dict:
-    m = re.search(r'data-react-props="({.*?})"', html, re.S)
-    if not m:
-        return {}
-    raw = htmllib.unescape(m.group(1))
-    return json.loads(raw).get("resultsData", {})
+def extract_links(pw_page, base_url: str) -> tuple[list[str], list[str]]:
+    """
+    Return (section_links, doc_links) found on the current page.
+    section_links: /epstein/... sub-pages to recurse into
+    doc_links:     direct document download URLs
+    """
+    html = pw_page.content()
 
+    all_hrefs = re.findall(r'href=["\']([^"\']+)["\']', html)
 
-def search_page(query: str, page: int) -> tuple[list[str], int]:
-    """Return (url_list, total_pages) for one search results page."""
-    resp = requests.get(
-        SEARCH_BASE,
-        params={"query": query, "affiliate": AFFILIATE, "page": page},
-        headers=HEADERS,
-        timeout=30,
-    )
-    resp.raise_for_status()
-    rd = _parse_results_data(resp.text)
-    urls = [r["url"] for r in rd.get("results", []) if r.get("url")]
-    total_pages = rd.get("totalPages", 1)
-    return urls, total_pages
+    section_links = []
+    doc_links = []
 
+    for href in all_hrefs:
+        # Resolve relative URLs
+        if href.startswith("/"):
+            full = BASE_URL + href
+        elif href.startswith("http"):
+            full = href
+        else:
+            full = urljoin(base_url, href)
 
-MAX_PAGES_PER_QUERY = 5  # 5 pages × 20 results = 100 results per query
+        # Strip Akamai bm-verify noise
+        full = re.sub(r"[?&]bm-verify=[^&#]*", "", full).rstrip("?&")
 
+        parsed = urlparse(full)
 
-def collect_result_urls(query: str) -> list[str]:
-    """Fetch up to MAX_PAGES_PER_QUERY result pages and return deduplicated URLs."""
-    urls, total_pages = search_page(query, 1)
-    pages_to_fetch = min(total_pages, MAX_PAGES_PER_QUERY)
-    for page in range(2, pages_to_fetch + 1):
-        time.sleep(SEARCH_DELAY)
-        more, _ = search_page(query, page)
-        urls.extend(more)
-    # Strip Akamai bm-verify params that get injected into some result URLs
-    cleaned = []
-    for u in urls:
-        u = re.sub(r"[?&]bm-verify=[^&#]*", "", u).rstrip("?&")
-        cleaned.append(u)
-    return list(dict.fromkeys(cleaned))  # preserve order, deduplicate
+        # Document files
+        if DOC_EXTENSIONS.search(parsed.path):
+            doc_links.append(full)
+            continue
+
+        # Sub-sections of the Epstein disclosure tree on justice.gov
+        if "justice.gov" in parsed.netloc and parsed.path.startswith("/epstein/"):
+            if parsed.path not in (DISCLOSURE_ROOT, "/epstein", "/epstein/"):
+                section_links.append(full)
+
+    return list(dict.fromkeys(section_links)), list(dict.fromkeys(doc_links))
 
 
 # ---------------------------------------------------------------------------
-# PDF link extraction (Playwright)
+# Filename
 # ---------------------------------------------------------------------------
 
-PDF_SELECTORS = [
-    'a[href$=".pdf"]',
-    'a[href*=".pdf?"]',
-    'a[href*="/sites/default/files/"]',
-    'a[href*="documents/"]',
-]
-
-
-def extract_pdf_links(pw_page, page_url: str) -> list[str]:
-    """Navigate to page_url and return all PDF hrefs found."""
-    try:
-        pw_page.goto(page_url, wait_until="domcontentloaded", timeout=25_000)
-        pw_page.wait_for_timeout(1_500)  # let any JS rendering finish
-    except Exception as e:
-        print(f"    [page error] {e}")
-        return []
-
-    links = pw_page.eval_on_selector_all(
-        ", ".join(PDF_SELECTORS),
-        "els => els.map(el => el.href)",
-    )
-    # Also catch direct .pdf links anywhere in the HTML
-    extra = re.findall(
-        r'https?://[^\s"\'<>]+\.pdf(?:[?#][^\s"\'<>]*)?',
-        pw_page.content(),
-        re.I,
-    )
-    return list(dict.fromkeys(links + extra))
+def filename_from_url(url: str) -> str:
+    path = urlparse(url).path
+    name = path.rstrip("/").split("/")[-1]
+    name = re.sub(r"[^\w.\-]", "_", name)
+    if not name or name == "_":
+        name = hashlib.md5(url.encode()).hexdigest()[:16]
+    # Ensure it has an extension
+    if "." not in name:
+        name += ".pdf"
+    return name
 
 
 # ---------------------------------------------------------------------------
 # Download
 # ---------------------------------------------------------------------------
 
-def filename_from_url(url: str) -> str:
-    path = urlparse(url).path
-    name = path.rstrip("/").split("/")[-1]
-    if not name.lower().endswith(".pdf"):
-        name = hashlib.md5(url.encode()).hexdigest()[:16] + ".pdf"
-    # Sanitise for filesystem
-    name = re.sub(r'[^\w.\-]', '_', name)
-    return name
-
-
-def download_pdf(url: str, dest: Path, session_cookies: dict) -> bool:
+def download_file(url: str, dest: Path, session_cookies: dict) -> bool:
     try:
         resp = requests.get(
-            url,
-            headers=HEADERS,
-            cookies=session_cookies,
-            timeout=90,
-            stream=True,
+            url, headers=HEADERS, cookies=session_cookies,
+            timeout=120, stream=True, allow_redirects=True,
         )
         resp.raise_for_status()
-        content_type = resp.headers.get("Content-Type", "")
-        if "pdf" not in content_type.lower() and not url.lower().endswith(".pdf"):
-            print(f"    [skip] not a PDF ({content_type}): {url}")
-            return False
         with open(dest, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=16_384):
+            for chunk in resp.iter_content(chunk_size=32_768):
                 f.write(chunk)
-        return True
+        return dest.stat().st_size > 0
     except Exception as e:
         print(f"    [download error] {e}")
         return False
 
 
 # ---------------------------------------------------------------------------
-# Main crawl loop
+# Main crawl
 # ---------------------------------------------------------------------------
 
-def crawl(query_iter, headless: bool = True):
+def crawl(headless: bool = True):
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    seen_pages = load_set(SEEN_FILE)   # result pages already visited
-    seen_pdfs  = load_set(PDF_LOG)     # PDF URLs already downloaded
+    seen_pages = load_set(SEEN_FILE)
+    seen_docs  = load_set(PDF_LOG)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
+        browser = p.chromium.launch(
+            headless=headless,
+            args=["--disable-blink-features=AutomationControlled"],
+        )
         context = browser.new_context(
-            user_agent=HEADERS["User-Agent"],
+            user_agent=UA,
             accept_downloads=True,
         )
-
-        # Inject Queue-IT cookie so justice.gov lets us through its waiting room
+        context.add_init_script(
+            'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
+        )
         context.add_cookies([{
             "name":   QUEUE_IT_COOKIE_NAME,
             "value":  QUEUE_IT_COOKIE_VALUE,
@@ -231,88 +193,92 @@ def crawl(query_iter, headless: bool = True):
 
         pw_page = context.new_page()
 
-        # Warm-up: visit the Epstein page once so Akamai issues session cookies
-        print(f"[warmup] navigating to {START_URL}")
-        try:
-            pw_page.goto(START_URL, wait_until="domcontentloaded", timeout=30_000)
-            pw_page.wait_for_timeout(4_000)
-        except Exception as e:
-            print(f"[warmup error] {e} — continuing anyway")
+        # Warm up: let Akamai issue a valid session cookie
+        print(f"[warmup] {BASE_URL}/epstein")
+        pw_page.goto(f"{BASE_URL}/epstein", wait_until="networkidle", timeout=45_000)
+        pw_page.wait_for_timeout(4_000)
 
-        # Collect session cookies for use in requests-based downloads
-        def get_session_cookies() -> dict:
-            return {c["name"]: c["value"] for c in context.cookies()}
+        # ---- Phase 1: walk the disclosure tree and collect all doc links ----
+        queue   = [BASE_URL + DISCLOSURE_ROOT]
+        doc_urls: set[str] = set()
 
-        # ---- Phase 1: collect all result page URLs via search API ----
-        result_urls: set[str] = set()
-        print("\n[phase 1] searching…")
+        print(f"\n[phase 1] walking disclosure tree…")
 
-        for query in query_iter:
-            print(f"  QUERY: {query[:80]}")
-            try:
-                urls = collect_result_urls(query)
-                new = [u for u in urls if u not in seen_pages]
-                result_urls.update(new)
-                print(f"    → {len(new)} new URLs (total {len(result_urls)})")
-            except Exception as e:
-                print(f"    [search error] {e}")
-            time.sleep(SEARCH_DELAY)
+        while queue:
+            page_url = queue.pop(0)
 
-        print(f"\n[phase 1 done] {len(result_urls)} unique result pages to visit")
-
-        # ---- Phase 2: visit each result page and collect PDF links ----
-        pdf_urls: set[str] = set()
-        print("\n[phase 2] extracting PDF links…")
-
-        for page_url in result_urls:
             if page_url in seen_pages:
                 continue
-            print(f"  PAGE: {page_url[:100]}")
-            links = extract_pdf_links(pw_page, page_url)
-            for link in links:
-                if link not in seen_pdfs:
-                    pdf_urls.add(link)
-                    print(f"    PDF: {link[:100]}")
-            append_to_file(SEEN_FILE, page_url)
+
+            print(f"  SECTION: {page_url.replace(BASE_URL, '')}")
+            try:
+                pw_page.goto(page_url, wait_until="domcontentloaded", timeout=25_000)
+                pw_page.wait_for_timeout(1_500)
+            except Exception as e:
+                print(f"    [nav error] {e}")
+                seen_pages.add(page_url)
+                append_line(SEEN_FILE, page_url)
+                continue
+
+            sections, docs = extract_links(pw_page, page_url)
+
+            new_sections = [s for s in sections if s not in seen_pages and s not in queue]
+            new_docs     = [d for d in docs     if d not in seen_docs]
+
+            queue.extend(new_sections)
+            doc_urls.update(new_docs)
+
+            if new_docs:
+                print(f"    → {len(new_docs)} new docs  |  queue: {len(queue)}  |  total docs: {len(doc_urls)}")
+
             seen_pages.add(page_url)
+            append_line(SEEN_FILE, page_url)
             time.sleep(PAGE_DELAY)
 
-        print(f"\n[phase 2 done] {len(pdf_urls)} PDF URLs to download")
+        print(f"\n[phase 1 done] {len(doc_urls)} documents to download")
 
-        # ---- Phase 3: download PDFs ----
-        print("\n[phase 3] downloading…")
-        session_cookies = get_session_cookies()
+        # ---- Phase 2: download ----
+        session_cookies = {c["name"]: c["value"] for c in context.cookies()}
 
-        for pdf_url in pdf_urls:
-            if pdf_url in seen_pdfs:
+        print(f"\n[phase 2] downloading…")
+        downloaded = 0
+
+        for doc_url in sorted(doc_urls):
+            if doc_url in seen_docs:
                 continue
-            filename = filename_from_url(pdf_url)
+
+            filename = filename_from_url(doc_url)
             dest = OUTPUT_DIR / filename
+
             if dest.exists():
-                append_to_file(PDF_LOG, pdf_url)
-                seen_pdfs.add(pdf_url)
+                append_line(PDF_LOG, doc_url)
+                seen_docs.add(doc_url)
                 continue
 
-            print(f"  DOWNLOAD: {filename}")
-            ok = download_pdf(pdf_url, dest, session_cookies)
+            print(f"  {filename}")
+            ok = download_file(doc_url, dest, session_cookies)
+
             if ok:
                 size_kb = dest.stat().st_size / 1024
-                print(f"    saved {size_kb:.0f} KB → {dest.name}")
-                append_to_file(PDF_LOG, pdf_url)
-                seen_pdfs.add(pdf_url)
+                print(f"    saved {size_kb:,.0f} KB")
+                append_line(PDF_LOG, doc_url)
+                seen_docs.add(doc_url)
+                downloaded += 1
             else:
-                # Retry once through Playwright for files behind Akamai
+                # Retry via Playwright (handles redirects behind Akamai)
+                print(f"    retrying via Playwright…")
                 try:
-                    print(f"    retrying via Playwright…")
-                    with context.expect_download() as dl_info:
-                        pw_page.goto(pdf_url, timeout=30_000)
-                    download = dl_info.value
-                    download.save_as(dest)
-                    print(f"    saved via Playwright → {dest.name}")
-                    append_to_file(PDF_LOG, pdf_url)
-                    seen_pdfs.add(pdf_url)
+                    with context.expect_download(timeout=30_000) as dl_info:
+                        pw_page.goto(doc_url, timeout=30_000)
+                    dl = dl_info.value
+                    dl.save_as(dest)
+                    size_kb = dest.stat().st_size / 1024
+                    print(f"    saved {size_kb:,.0f} KB (via Playwright)")
+                    append_line(PDF_LOG, doc_url)
+                    seen_docs.add(doc_url)
+                    downloaded += 1
                 except Exception as e:
-                    print(f"    [retry error] {e}")
+                    print(f"    [failed] {e}")
                     if dest.exists():
                         dest.unlink()
 
@@ -320,7 +286,7 @@ def crawl(query_iter, headless: bool = True):
 
         browser.close()
 
-    print(f"\n[done] files saved to {OUTPUT_DIR}")
+    print(f"\n[done] {downloaded} files downloaded to {OUTPUT_DIR}")
 
 
 # ---------------------------------------------------------------------------
@@ -329,9 +295,8 @@ def crawl(query_iter, headless: bool = True):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="DOJ Epstein document crawler")
-    parser.add_argument("--limit",    type=int,  default=None,           help="max number of queries to run")
-    parser.add_argument("--headless", type=str,  default="true",         help="true/false — show browser window")
-    parser.add_argument("--reset",    action="store_true",               help="clear progress files and restart")
+    parser.add_argument("--headless", default="true", help="true/false")
+    parser.add_argument("--reset", action="store_true", help="clear progress and restart")
     args = parser.parse_args()
 
     if args.reset:
@@ -340,10 +305,4 @@ if __name__ == "__main__":
                 f.unlink()
         print("[reset] progress cleared")
 
-    headless = args.headless.lower() != "false"
-    queries  = generate_queries()
-    if args.limit:
-        from itertools import islice
-        queries = islice(queries, args.limit)
-
-    crawl(queries, headless=headless)
+    crawl(headless=args.headless.lower() != "false")
