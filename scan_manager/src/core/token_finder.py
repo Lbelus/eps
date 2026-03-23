@@ -143,7 +143,49 @@ class token_finder:
             pos = match + token_len
             result.append(text[pos+1:pos + offset])
         return result
+   
+    def kmp_search(self, patterns, text, token):
+        matches = []
+        values = []
+        for pattern in patterns:
+            print(f"looking for kmp pattern: {pattern}")
+            pattern = self.normalize_text(pattern)
+            matches = self.kmp(text, pattern)
+            values = self.set_tokens(matches, pattern, text, token.get("extract_after", 10))
+            if values:
+                break
+        return matches, values
     
+    def regex_search(self, patterns, text, token):
+        for idx, raw_pattern in enumerate(patterns):
+            pattern = self.normalize_text(raw_pattern)
+            matches = []
+            values = []
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                matches.append(match.start())
+                value = match.group(token.get("group", 0))
+                if token.get("strip_spaces"):
+                    value = value.replace(" ", "")
+                if token.get("valid_amount") and not self.is_valid_amount(value):
+                   value = "" 
+                if value.strip():
+                    matches.append(match.start())
+                    values.append(value)
+            if values:  # Only keep first match set
+                break
+            return matches, values
+
+    def fuzzy_search(self, patterns, text, token): 
+        threshold = token.get("threshold", 85)
+        matches = []
+        values = []
+        for pattern in patterns:
+            pattern = self.normalize_text(pattern)
+            matches = self.fuzzy_find(text, pattern, threshold)
+            values = self.set_tokens(matches, pattern, text, token.get("extract_after", 10))
+            if values:
+                break
+        return matches, values
 
     ################ find_tokens_pos #################
     # For a given page, find matches and values for each configured token.
@@ -159,78 +201,27 @@ class token_finder:
         json_doc.setdefault("metadata", {})
         json_doc["metadata"].setdefault("pos", {})
         json_doc["metadata"].setdefault("values", {})
-        print("here")
         for token in token_list:
             print(f"working on token {token}")
             label = token["label"]
             method = token["method"]
-            # pattern = self.normalize_text(token["pattern"])
             patterns = token.get("patterns")
             if not patterns:
                 patterns = [token["pattern"]]
+            matches = []
+            values = []
             if method == "kmp":
-                matches = []
-                values = []
-                for pattern in patterns:
-                    print(f"looking for kmp pattern: {pattern}")
-                    pattern = self.normalize_text(pattern)
-                    matches = self.kmp(text, pattern)
-                    values = self.set_tokens(matches, pattern, text, token.get("extract_after", 10))
-                    if values:
-                        break
-#             if method == "kmp":
-#                 matches = self.kmp(text, patterns)
-#                 values = self.set_tokens(matches, patterns, text, token.get("extract_after", 10))
+                matches, values = self.kmp_search(patterns, text, token)
             elif method == "regex":
-                matches = []
-                values = []
-                for idx, raw_pattern in enumerate(patterns):
-                    pattern = self.normalize_text(raw_pattern)
-                    matches = []
-                    values = []
-                    for match in re.finditer(pattern, text, re.IGNORECASE):
-                        matches.append(match.start())
-                        value = match.group(token.get("group", 0))
-                        if token.get("strip_spaces"):
-                            value = value.replace(" ", "")
-                        if token.get("valid_amount") and not self.is_valid_amount(value):
-                           value = "" 
-                        if value.strip():
-                            matches.append(match.start())
-                            values.append(value)
-                             
-
-                    if values:  # Only keep first match set
-                        break
-#                 matches = []
-#                 values = []
-#                 for match in re.finditer(pattern, text, re.IGNORECASE):
-#                     matches.append(match.start())
-#                     value = match.group(token.get("group", 0))
-#                     if token.get("strip_spaces"):
-#                         value = value.replace(" ", "")
-#                     values.append(value)
+                matches, values = self.regex_search(patterns, text, token)
             elif method == "fuzzy":
-                threshold = token.get("threshold", 85)
-                matches = []
-                values = []
-                for pattern in patterns:
-                    pattern = self.normalize_text(pattern)
-                    matches = self.fuzzy_find(text, pattern, threshold)
-                    values = self.set_tokens(matches, pattern, text, token.get("extract_after", 10))
-                    if values:
-                        break
-#             elif method == "fuzzy":
-#                 threshold = token.get("threshold", 85)
-#                 matches = self.fuzzy_find(text, patterns, threshold)
-#                 values = self.set_tokens(matches, patterns, text, token.get("extract_after", 10))
+                matches, value = self.fuzzy_search(patterns, text, token) 
             json_doc["metadata"]["pos"].setdefault(label, []).extend(matches)
             if token.get("merge") and len(values) > 1:
                 merged_value = " ".join(values)
                 json_doc["metadata"]["values"].setdefault(label, []).append(merged_value)
             else:
                 json_doc["metadata"]["values"].setdefault(label, []).extend(values)
-            #json_doc["metadata"]["values"].setdefault(label, []).extend(values)
 
     ################ update_file #################
     # Write updated JSON to output_dir using same filename.
