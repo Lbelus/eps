@@ -39,3 +39,19 @@
 
 # debug information files
 *.dwo
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Scan manager data (generated/downloaded)
+scan_manager/data/input/
+scan_manager/data/output/
+scan_manager/data/json/
+scan_manager/data/csv/
+scan_manager/data/*.db
+scan_manager/data/*.db-shm
+scan_manager/data/*.db-wal
+scan_manager/data/crawl_seen.txt
+scan_manager/data/crawl_pdfs.txt

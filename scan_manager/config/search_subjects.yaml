@@ -1,0 +1,79 @@
+# Search subjects for Epstein/Maxwell document crawler
+# All names sourced from unsealed federal court filings, flight logs,
+# and DOJ prosecution records (US v. Maxwell, Giuffre v. Maxwell, etc.)
+
+# ---------------------------------------------------------------------------
+# Primary subjects
+# ---------------------------------------------------------------------------
+primary:
+  - Jeffrey Epstein
+  - Ghislaine Maxwell
+
+# ---------------------------------------------------------------------------
+# Associates — named in court documents, depositions, or flight logs
+# ---------------------------------------------------------------------------
+
+# Politicians & government officials
+politicians:
+  - Bill Clinton
+  - Donald Trump
+  - Prince Andrew
+  - Bill Richardson
+  - George Mitchell
+  - Ehud Barak
+  - Alexander Acosta
+
+# Legal & academic
+legal:
+  - Alan Dershowitz
+  - Kenneth Starr
+  - Jay Lefkowitz
+  - Gerald Lefcourt
+  - Lawrence Krauss
+
+# Business & finance
+business:
+  - Les Wexner
+  - Leon Black
+  - Glenn Dubin
+  - Tom Pritzker
+  - Mort Zuckerman
+  - Jes Staley
+  - Reid Hoffman
+  - Peter Mandelson
+
+# Entertainment & modeling
+entertainment:
+  - Jean-Luc Brunel
+  - Naomi Campbell
+  - Kevin Spacey
+  - Chris Tucker
+
+# Inner circle — co-conspirators and staff named in indictments
+inner_circle:
+  - Sarah Kellen
+  - Nadia Marcinkova
+  - Lesley Groff
+  - Adriana Ross
+  - Juan Alessi
+  - Haley Robson
+
+# Victims who have gone public (named in unsealed filings)
+victims_public:
+  - Virginia Giuffre
+  - Courtney Wild
+  - Annie Farmer
+  - Maria Farmer
+
+# ---------------------------------------------------------------------------
+# Search queries — combined phrases for broader document discovery
+# ---------------------------------------------------------------------------
+queries:
+  - Epstein flight logs
+  - Epstein black book
+  - Epstein island visitor
+  - Maxwell trafficking
+  - Epstein plea deal
+  - Epstein victim testimony
+  - Little St James
+  - Zorro Ranch

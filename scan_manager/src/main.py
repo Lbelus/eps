@@ -7,13 +7,26 @@ from plugin.scan_manager import tokenize_docs, process_dir, process_inclusion_se
 def main():
     parser = argparse.ArgumentParser(description="Make ocr scan and tokenize docs and improve quality through a round trip strategy")
     parser.add_argument(
-        "--mode", 
-        choices=["scan", "scan_exclude", "scan_include", "round_trip"], 
-        required=True, 
+        "--mode",
+        choices=["scan", "scan_exclude", "scan_include", "round_trip", "ingest", "search"],
+        required=True,
         help="Choose the document parser mode"
     )
+    parser.add_argument("--workers", type=int, default=None, help="Number of parallel OCR workers (ingest mode)")
+    parser.add_argument("--query", type=str, default=None, help="Search query (search mode)")
+    parser.add_argument("--limit", type=int, default=20, help="Max search results (search mode)")
     args = parser.parse_args()
-    if args.mode == "scan":
+    if args.mode == "ingest":
+        from core.ingest import ingest_all
+        ingest_all("./data/input/", "./data/epstein.db", args.workers)
+        return
+    elif args.mode == "search":
+        if not args.query:
+            parser.error("--query is required for search mode")
+        from core.search import search_cli
+        search_cli("./data/epstein.db", args.query, args.limit)
+        return
+    elif args.mode == "scan":
         process_dir("./data/input/","./data/output/")
         tokenize_docs("./config/doc_template.yaml", "./data/output", "./data/json") # tokenize the newly created Jsons
         json_folder_to_csv("./data/json/", "./data/csv/merged.csv", "EFTA*.json")
