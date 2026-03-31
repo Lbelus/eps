@@ -1,204 +1,281 @@
-# Scan_manager
+# EPS — Epstein Paper System
+
+Document research pipeline for collecting, OCR'ing, and searching public court filings and government releases related to the Jeffrey Epstein and Ghislaine Maxwell cases.
 
 ```mermaid
 graph TD
-    A[/"Clients"/] --> B("(Auth)")
-    B --> C["Monolith (Python App)"]
-    C <--> D["REST API (C++)"]
-    D <--> E[("MySQL Database")]
-    D <--> F[("Redis (Optional)")]
-
-    subgraph Optional
-        G{"Load Balancer: Clients - reverse proxy / proxy  <-> Monolith"}
+    subgraph Sources
+        S1["DOJ Disclosures"]
+        S2["CourtListener RECAP"]
+        S3["DocumentCloud"]
     end
 
-    B --> G
-    C --> A
-    G <--> C
-    G --> A
+    S1 --> CR["Crawler (Playwright + requests)"]
+    S2 --> CR
+    S3 --> CR
 
-    subgraph "Monolith Services"
-        C1[["Doc Serializer (XLS, PDF, HTML -> JSON) <br>(PDF) Input: 689 KB Output: 8 KB Time: 2.5641 s <br>(HTM) Input: 44 KB Output: 20 KB Time: 0.0300 s"]]
-        C2[["Document Parser <br>Input: 20 KB <br>Output: 25 KB <br>Time: 0.0005 s"]]
-    end
+    CR --> PDF["data/input/ (PDFs)"]
+    PDF --> OCR["Ingest Pipeline (Tesseract OCR x4 workers)"]
+    OCR --> DB[("epstein.db (SQLite + FTS5)")]
+    DB --> SEARCH["Full-Text Search CLI"]
 
-    C --> C1
-    C --> C2
+    PDF --> LEGACY["Legacy Pipeline (OCR → tokenize → CSV)"]
+    LEGACY --> JSON["data/json/"]
+    JSON --> CSV["data/csv/merged.csv"]
 
-    %% Metrics as comments and annotations
-    C1 --> M1("Serialize a pdf in 2.50s ")
-    M1 --> M2("Stores processed JSON only (no raw files)")
+    DB --> API["REST API (C++)"]
+    API <--> MYSQL[("MySQL")]
 
-    C2 --> M3("No metric but load is of no consequences")
-    M3 --> M4("Return serialized e-mails to the client in a json format")   
+    classDef source fill:#e3f2fd,stroke:#2196f3,stroke-width:2px,color:#000;
+    classDef process fill:#ede7f6,stroke:#673ab7,stroke-width:2px,color:#000;
+    classDef storage fill:#f1f8e9,stroke:#558b2f,stroke-width:2px,color:#000;
+    classDef db fill:#fff3e0,stroke:#fb8c00,stroke-width:2px,color:#000;
 
-
-    %% Assign classes
-    class A client;
-    class B auth;
-    class C monolith;
-    class D api;
-    class E,F db;
-    class G proxy;
-    class C1,C2,C3,C4 service;
-    class M1,M2,M3,M4,M5,M6,M7,M8 metric;
-
-    %% Define styles
-    classDef client fill:#e3f2fd,stroke:#2196f3,stroke-width:2px,color:#000;
-    classDef auth fill:#fff3e0,stroke:#fb8c00,stroke-width:2px,color:#000;
-    classDef monolith fill:#ede7f6,stroke:#673ab7,stroke-width:2px,color:#000;
-    classDef api fill:#e0f7fa,stroke:#00acc1,stroke-width:2px,color:#000;
-    classDef db fill:#f1f8e9,stroke:#558b2f,stroke-width:2px,color:#000;
-    classDef proxy fill:#fce4ec,stroke:#ec407a,stroke-width:2px,color:#000;
-    classDef service fill:#f3e5f5,stroke:#9c27b0,stroke-width:1.5px,color:#000;
-    classDef metric fill:#f5f5f5,stroke:#9e9e9e,stroke-dasharray: 5 5,color:#000;
+    class S1,S2,S3 source;
+    class CR,OCR,LEGACY,SEARCH process;
+    class PDF,JSON,CSV storage;
+    class DB,MYSQL db;
 ```
 
-### Data Highlights
+---
 
-| Component            | Input  | Output | Time     |
-| -------------------- | ------ | ------ | -------- |
-| Doc Serializer (PDF) | 689 KB | 8 KB   | 2.5641 s |
-| Doc Serializer (HTM) | 44 KB  | 20 KB  | 0.0300 s |
-| Document Parser      | 20 KB  | 25 KB  | 0.0005 s |
-
-
-### Color Roles
-
-| Role          | Background     | Border      |
-| ------------- | -------------- | ----------- |
-| Clients       | Light Blue     | Blue        |
-| Auth          | Light Orange   | Deep Orange |
-| Monolith      | Light Purple   | Indigo      |
-| REST API      | Aqua           | Cyan        |
-| Databases     | Light Green    | Green       |
-| Proxy/LB      | Pink           | Rose        |
-| Internal Svcs | Light Lavender | Purple      |
-| Metrics       | Light Gray     | Dashed Gray |
-
-
-### Custom Shapes Legend
-
-| Shape           | Component Type             |
-| --------------- | -------------------------- |
-| `rect`          | General Services / App     |
-| `cylinder`      | Databases (MySQL, Redis)   |
-| `parallelogram` | Client Input/Output        |
-| `hexagon`       | Load Balancer / Proxy      |
-| `roundrect`     | Auth / Identity            |
-| `subroutine`    | Internal Monolith Services |
-
-* **`/"..."`** → Parallelogram (Client)
-* **`[...]`** → Rectangle (Monolith/API)
-* **`[(...)]`** → Cylinder (Database)
-* **`[[...]]`** → Subroutine (Internal service)
-* **`{{...}}`** → Hexagon (Proxy/Load Balancer)
-* **`(...)`** → Roundrect (Auth, metrics)
-
-
-***
-
-# Scan_manager
-Small toolkit to turn messy business docs into structured data and back again.
-It can OCR PDFs/HTML → JSON, extract fields via KMP/regex + YAML and talk to a REST backend.
-
-## Description
-
-**What it does**
-
-* Convert **PDF/HTML → JSON** with OCR (Tesseract) — one page, one text block.
-* Find fields by **tokens** (KMP or regex) driven by a **YAML config**.
-* Minimal **REST client** for simple CRUD-ish backends.
-
-## Installation
-
-### Requirements
-
-* **Python 3.10+**
-* **System deps**
-
-  * Tesseract OCR (Prerequisites at: https://pypi.org/project/pytesseract/)
-
-
-### System packages (examples)
-
-* Ubuntu/Debian:
-
-  ```bash
-  sudo apt-get update
-  sudo apt-get install tesseract-ocr poppler-utils
-  ```
-
-### Python packages
+## Quick Start
 
 ```bash
-python -m venv .venv && source .venv/bin/activate  # on Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+cd scan_manager
+python -m venv .venv
+source .venv/bin/activate
+pip install pyyaml pdf2image pytesseract pillow beautifulsoup4 rapidfuzz requests playwright
+playwright install chromium
 ```
+
+**System dependencies** (macOS):
+```bash
+brew install tesseract poppler
+```
+
+**Ubuntu/Debian:**
+```bash
+sudo apt-get install tesseract-ocr poppler-utils
+```
+
+---
 
 ## Usage
 
-### 1) PDF/HTML → JSON (OCR)
+### 1. Crawl documents
 
-```python
-from pathlib import Path
-from core.json_converter import json_converter
-
-converter = json_converter(Path("./input"), Path("./output"))
-converter.process_docs()  # writes one JSON per input file
+```bash
+python -m src.web.crawler                          # All sources
+python -m src.web.crawler --source doj             # DOJ only
+python -m src.web.crawler --source courtlistener   # CourtListener only
+python -m src.web.crawler --source documentcloud   # DocumentCloud only
+python -m src.web.crawler --headless false          # Show browser
+python -m src.web.crawler --reset                   # Clear progress, fresh start
 ```
 
-### 2) Token extraction (YAML-driven KMP/regex)
+The crawler searches for documents related to subjects defined in `config/search_subjects.yaml` — Epstein, Maxwell, and associated individuals from public court records.
 
-`config/doc_template.yaml` (example):
+### 2. Ingest PDFs into database
 
-```yaml
-documents:
-  invoice:
-    match: ".*invoice.*\\.json$"
-    tokens:
-      - label: total_eur
-        method: regex
-        pattern: "Total\\s*:?\\s*([\\d.,]+)\\s*(?:EUR|€)"
-        group: 1
-      - label: order_number
-        method: kmp
-        pattern: "Numéro de la commande"
-        extract_after: 30
+```bash
+python src/main.py --mode ingest                   # OCR all PDFs → SQLite (parallel)
+python src/main.py --mode ingest --workers 2       # Limit workers (default: 4)
 ```
 
-Run:
+Parallel OCR with Tesseract. Resumable — re-runs skip already-ingested files.
 
-```python
-from core.token_finder import load_token_config, token_finder
+### 3. Search
 
-token_config = load_token_config("./config/doc_template.yaml")
-tf = token_finder("./output", "./updated", token_config)
-tf.process_docs()  # writes enriched JSON with page["pos"] and page["values"]
+```bash
+python src/main.py --mode search --query "grand jury"
+python src/main.py --mode search --query "flight logs" --limit 50
 ```
 
+Full-text search with FTS5 snippet highlighting.
 
-### 3) Minimal REST client
+### 4. Legacy pipeline (token extraction)
 
-```python
-from core.rest_client import RestApiClient
-
-api = RestApiClient("127.0.0.1:3004")
-print(api.read_all("users"))
-print(api.create_entity("users", {"name": "Alice"}))
+```bash
+python src/main.py --mode scan           # Full: OCR → tokenize → CSV
+python src/main.py --mode scan_exclude   # OCR only files NOT in CSV
+python src/main.py --mode scan_include   # OCR only files already in CSV
+python src/main.py --mode round_trip     # Re-import CSV corrections into JSON
 ```
 
-## Support
+---
 
-* Open an issue in the repository (preferred).
-* Or reach out via email: **[lorris.belus@cs-soprasteria.com](mailto:lorris.belus@cs-soprasteria.com)**.
+## Database Schema
 
+### SQLite (`data/epstein.db`)
 
+The ingest pipeline stores OCR'd text in SQLite with FTS5 full-text search.
+
+#### `documents`
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `document_id` | INTEGER | Primary key, auto-increment |
+| `filename` | TEXT | Unique filename from `data/input/` |
+| `source` | TEXT | `cl` (CourtListener), `dc` (DocumentCloud), or `doj` |
+| `page_count` | INTEGER | Number of pages in the PDF |
+| `full_text` | TEXT | All pages concatenated (OCR output) |
+| `created_at` | TEXT | Timestamp of ingestion |
+
+#### `pages`
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `page_id` | INTEGER | Primary key, auto-increment |
+| `document_id` | INTEGER | FK → `documents.document_id` |
+| `page_number` | INTEGER | 1-indexed page number |
+| `page_text` | TEXT | OCR text for this page |
+
+#### `documents_fts` (FTS5 virtual table)
+
+Full-text search index over `documents.full_text`. Auto-synced via `AFTER INSERT/UPDATE/DELETE` triggers on the `documents` table.
+
+**Search example (raw SQL):**
+```sql
+SELECT d.filename, d.source, d.page_count,
+       snippet(documents_fts, 0, '>>>', '<<<', '...', 32) as snippet
+FROM documents_fts f
+JOIN documents d ON d.document_id = f.rowid
+WHERE documents_fts MATCH 'Maxwell AND deposition'
+ORDER BY rank
+LIMIT 20;
 ```
 
-## Authors and acknowledgment
+#### Indexes
 
-* **Author and Maintainer:** *Lorris BELUS*
+| Index | Table | Column(s) |
+|-------|-------|-----------|
+| `idx_pages_document` | `pages` | `document_id` |
+| `idx_documents_source` | `documents` | `source` |
 
-* Thanks to open-source projects: Tesseract, Poppler, pdf2image, BeautifulSoup.
+#### ER Diagram
 
+```mermaid
+erDiagram
+    documents {
+        INTEGER document_id PK
+        TEXT filename UK
+        TEXT source
+        INTEGER page_count
+        TEXT full_text
+        TEXT created_at
+    }
+    pages {
+        INTEGER page_id PK
+        INTEGER document_id FK
+        INTEGER page_number
+        TEXT page_text
+    }
+    documents_fts {
+        TEXT full_text
+    }
+    documents ||--o{ pages : "has"
+    documents ||--|| documents_fts : "indexed by"
+```
+
+---
+
+## Data Sources
+
+| Source | Method | What it finds |
+|--------|--------|---------------|
+| **DOJ** | Playwright tree walk of `justice.gov/epstein/doj-disclosures` | Data sets, court records, FOIA releases, BOP footage, Maxwell proffer |
+| **CourtListener** | REST API search per subject (`/api/rest/v4/search/`) | RECAP archive of federal court filings (SDNY, S.D. Fla, 2nd Circuit, etc.) |
+| **DocumentCloud** | REST API search per subject | Public FOIA releases, indictments, depositions, interviews |
+
+### Search Subjects (`config/search_subjects.yaml`)
+
+All names sourced from unsealed federal court filings, flight logs, and DOJ prosecution records.
+
+| Category | Examples |
+|----------|---------|
+| Primary | Jeffrey Epstein, Ghislaine Maxwell |
+| Politicians | Bill Clinton, Donald Trump, Prince Andrew, Bill Richardson, George Mitchell, Alexander Acosta |
+| Legal | Alan Dershowitz, Kenneth Starr |
+| Business | Les Wexner, Leon Black, Glenn Dubin, Jes Staley |
+| Entertainment | Jean-Luc Brunel, Naomi Campbell, Kevin Spacey |
+| Inner circle | Sarah Kellen, Nadia Marcinkova, Lesley Groff |
+| Victims (public) | Virginia Giuffre, Courtney Wild, Annie Farmer |
+| Key queries | flight logs, black book, Little St James, Zorro Ranch |
+
+---
+
+## File Naming Conventions
+
+Files in `data/input/` are prefixed by source:
+
+| Prefix | Source | Example |
+|--------|--------|---------|
+| `cl_` | CourtListener | `cl_gov.uscourts.flsd.590436.1.0.pdf` |
+| `dc_` | DocumentCloud | `dc_Ghislaine-Maxwell-Indictment.pdf` |
+| (none) | DOJ | `EFTA02732399.pdf` |
+
+---
+
+## Directory Structure
+
+```
+scan_manager/
+├── config/
+│   ├── search_subjects.yaml    # Crawler search subjects
+│   └── doc_template.yaml       # Token patterns (legacy pipeline)
+├── data/
+│   ├── input/                  # Downloaded PDFs
+│   ├── output/                 # Raw OCR JSON (legacy)
+│   ├── json/                   # Enriched JSON (legacy)
+│   ├── csv/                    # Merged CSV (legacy)
+│   ├── epstein.db              # SQLite + FTS5 database
+│   ├── crawl_seen.txt          # Crawler: visited pages
+│   └── crawl_pdfs.txt          # Crawler: downloaded URLs
+├── src/
+│   ├── core/
+│   │   ├── database.py         # SQLite schema, insert, search
+│   │   ├── ingest.py           # Parallel OCR → DB pipeline
+│   │   ├── search.py           # CLI search interface
+│   │   ├── doc_serializer.py   # OCR engine (legacy)
+│   │   ├── token_finder.py     # Field extraction (legacy)
+│   │   └── round_trip.py       # CSV↔JSON sync (legacy)
+│   ├── web/
+│   │   ├── crawler.py          # Multi-source document crawler
+│   │   └── queries.py          # Search query generator
+│   ├── plugin/
+│   │   └── scan_manager.py     # Legacy pipeline orchestration
+│   └── main.py                 # CLI entry point
+```
+
+---
+
+## Performance
+
+| Component | Input | Output | Time |
+|-----------|-------|--------|------|
+| Doc Serializer (PDF) | 689 KB | 8 KB JSON | ~2.5 s |
+| Doc Serializer (HTM) | 44 KB | 20 KB JSON | ~0.03 s |
+| Ingest (parallel, 4 workers) | 1,166 PDFs / 1.9 GB | SQLite DB | varies by doc size |
+
+---
+
+## REST API (C++)
+
+Separate service in `rest_api/`. See [rest_api/README.md](../rest_api/) or the project CLAUDE.md for full docs.
+
+```bash
+cd rest_api
+source bash_scripts/helper_script.sh
+rest_api_build_dev && rest_api_run_dev
+```
+
+Default port: **3004**
+
+```
+GET    /exampleusers?limit=10&offset=0
+GET    /exampleusers/:id
+POST   /exampleusers   {"name":"...","email":"..."}
+PUT    /exampleusers/:id
+DELETE /exampleusers/:id
+```
