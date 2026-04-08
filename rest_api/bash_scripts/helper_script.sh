@@ -88,34 +88,49 @@ rest_api_get_container_ip()
     sudo docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $arg
 }
 
-rest_api_init_db()
+rest_api_init_documents_db()
 {
-    sudo docker exec -i mysqlserver mysql -u dev_admin -pdev_admin test_rest_DB <<EOF
-    CREATE TABLE IF NOT EXISTS users (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        name VARCHAR(100) NOT NULL
-    );
+    sudo docker exec -i mysqlserver mysql -u dev_admin -pdev_admin test_rest_DB <<'EOF'
+    CREATE TABLE IF NOT EXISTS documents (
+        document_id INT AUTO_INCREMENT PRIMARY KEY,
+        filename    VARCHAR(512) NOT NULL UNIQUE,
+        source      VARCHAR(255) NOT NULL,
+        page_count  INT NOT NULL,
+        full_text   LONGTEXT NOT NULL,
+        created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FULLTEXT KEY ft_documents_full_text (full_text),
+        INDEX idx_documents_source (source)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-    INSERT INTO users (name) VALUES ('Alice'), ('Bob');
-    
-    CREATE TABLE IF NOT EXISTS orders (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        designation VARCHAR(100) NOT NULL,
-        users_id INT NOT NULL,
-        FOREIGN KEY (users_id) REFERENCES users(id)
-    );
-
-   INSERT INTO orders (designation, users_id) VALUES 
-    ('Potato', 1),
-    ('Pasta', 2);
+    CREATE TABLE IF NOT EXISTS pages (
+        page_id      INT AUTO_INCREMENT PRIMARY KEY,
+        document_id  INT NOT NULL,
+        page_number  INT NOT NULL,
+        page_text    LONGTEXT NOT NULL,
+        INDEX idx_pages_document (document_id),
+        UNIQUE KEY uq_pages_document_page (document_id, page_number),
+        CONSTRAINT fk_pages_document
+            FOREIGN KEY (document_id)
+            REFERENCES documents(document_id)
+            ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 EOF
 }
 
-rest_api_drop_db()
+rest_api_test_migration()
 {
-    sudo docker exec -i mysqlserver mysql -u dev_admin -pdev_admin test_rest_DB <<EOF
-        DROP TABLE IF EXISTS orders;
-        DROP TABLE IF EXISTS users;
+    sudo docker exec -i mysqlserver mysql -u dev_admin -pdev_admin test_rest_DB -N -e "
+        SELECT 'documents', COUNT(*) FROM documents;
+        SELECT 'pages', COUNT(*) FROM pages;
+    "
+}
+
+
+rest_api_drop_db()
+{    
+    sudo docker exec -i mysqlserver mysql -u dev_admin -pdev_admin test_rest_DB <<'EOF'
+        DROP TABLE IF EXISTS pages;
+        DROP TABLE IF EXISTS documents;
 EOF
 }
 
@@ -171,10 +186,76 @@ rest_api_test_order_entity()
     curl http://$ip_port/order/users/name/asc
 }
 
-rest_api_test_read()
+# --------------------
+rest_api_test_documents_read_all()
 {
-    tarball=$1
-    tar -xf tarball
+    ip_port=$1
+    curl -X GET "http://$ip_port/courtdocuments"
+}
+
+rest_api_test_documents_read_all_paginated()
+{
+    ip_port=$1
+    limit=$2
+    offset=$3
+    curl -X GET "http://$ip_port/courtdocuments?limit=$limit&offset=$offset"
+}
+
+rest_api_test_documents_read_by_id()
+{
+    ip_port=$1
+    id=$2
+    curl -X GET "http://$ip_port/courtdocuments/$id"
+}
+
+rest_api_test_document_pages()
+{
+    ip_port=$1
+    document_id=$2
+    curl -X GET "http://$ip_port/courtdocuments/$document_id/pages"
+}
+
+rest_api_test_documents_search()
+{
+    ip_port=$1
+    query=$2
+    curl -G -X GET "http://$ip_port/courtdocuments/search" \
+        --data-urlencode "q=$query"
+}
+
+rest_api_test_documents_search_paginated()
+{
+    ip_port=$1
+    query=$2
+    limit=$3
+    offset=$4
+    curl -G -X GET "http://$ip_port/courtdocuments/search" \
+        --data-urlencode "q=$query" \
+        --data-urlencode "limit=$limit" \
+        --data-urlencode "offset=$offset"
+}
+
+rest_api_test_documents_smoke()
+{
+    ip_port=$1
+    doc_id=$2
+    query=$3
+
+    echo "==== READ ALL ===="
+    curl -s -X GET "http://$ip_port/courtdocuments" | jq
+
+    echo
+    echo "==== READ BY ID ===="
+    curl -s -X GET "http://$ip_port/courtdocuments/$doc_id" | jq
+
+    echo
+    echo "==== DOCUMENT PAGES ===="
+    curl -s -X GET "http://$ip_port/courtdocuments/$doc_id/pages" | jq
+
+    echo
+    echo "==== SEARCH ===="
+    curl -s -G -X GET "http://$ip_port/courtdocuments/search" \
+        --data-urlencode "q=$query" | jq
 }
 
 re()

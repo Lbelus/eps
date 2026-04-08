@@ -18,14 +18,15 @@ int main()
 
     mysql_thread_safe_func_ptr_t<> func_ptr_arr[] =
     {
-            &thread_safe_crow_get_all_entity,
-            &thread_safe_crow_get_entity_by_id,
-            &thread_safe_crow_insert_entity,
-            &thread_safe_crow_update_entity_by_id,
-            &thread_safe_crow_delete_entity_by_id,
-            &thread_safe_crow_get_joined_entities,
-            &thread_safe_crow_get_ordered_entities,
-            &mysqlExampleUsers_routes,
+            // &thread_safe_crow_get_all_entity,
+            // &thread_safe_crow_get_entity_by_id,
+            // &thread_safe_crow_insert_entity,
+            // &thread_safe_crow_update_entity_by_id,
+            // &thread_safe_crow_delete_entity_by_id,
+            // &thread_safe_crow_get_joined_entities,
+            // &thread_safe_crow_get_ordered_entities,
+            // &mysqlExampleUsers_routes,
+            &mysqlCourtDocuments_routes,
             NULL
     };
 
