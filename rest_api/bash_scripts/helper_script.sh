@@ -10,7 +10,12 @@ rest_api_build_dev()
 rest_api_run_dev()
 {
     sudo docker run --name mysqlserver --network sqlRest -e MYSQL_ROOT_PASSWORD=your_root_password -e MYSQL_DATABASE=test_rest_DB -e MYSQL_USER=dev_admin -e MYSQL_PASSWORD=dev_admin -v mysql_data_test_rest:/var/lib/mysql -p 3306:3306 -d mysql:8.0
-    sudo docker run -it --network sqlRest -v .:/workspace --name cont_llvm_mysql_crow img_llvm_mysql_crow /bin/bash
+    sudo docker run -it --network sqlRest -p 3004:3004 -v .:/workspace --name cont_llvm_mysql_crow img_llvm_mysql_crow /bin/bash
+}
+
+front_end_run_dev()
+{
+    sudo docker run -it --network sqlRest -p 8084:3000 -v ./:/workspace --name cont_eps_front img_eps_front
 }
 
 rest_api_start_dev()
