@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <crow.h>
+#include <crow/middlewares/cors.h>
 #include <mysql_conn_pool.hpp>
 
 const char* allocate_string(const char* str)
@@ -58,6 +59,30 @@ int simple_api(const mysql_connection_t* conn_id, mysql_simple_func_ptr_t<> func
 int thread_safe_api(const mysql_connection_t* conn_id, mysql_thread_safe_func_ptr_t<> func_ptr_arr[], int port)
 {
     crow::SimpleApp app;
+    SimpleConnectionPool pool(conn_id);
+    if (!mysqlpp::Connection::thread_aware())
+    {
+        std::cerr << "MySQL++/libmysqlclient not built thread-aware on this system\n";
+        return 1;
+    }
+    size_t index = 0;
+    while (func_ptr_arr[index] != NULL)
+    {
+        func_ptr_arr[index](app, pool);
+        index += 1;
+    }
+    app.port(port).multithreaded().run();
+    return EXIT_SUCCESS;
+}
+
+int thread_safe_cors_api(const mysql_connection_t* conn_id, mysql_thread_safe_cors_func_ptr_t<> func_ptr_arr[], int port, const char* allowed_origins)
+{
+    crow::App<crow::CORSHandler> app;
+    auto& cors = app.get_middleware<crow::CORSHandler>();
+    cors.global()
+        .headers("Content-Type")
+        .methods("GET"_method, "POST"_method, "PUT"_method, "DELETE"_method, "OPTIONS"_method)
+        .origin(allowed_origins);
     SimpleConnectionPool pool(conn_id);
     if (!mysqlpp::Connection::thread_aware())
     {
