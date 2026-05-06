@@ -57,6 +57,6 @@ enum class string_code
 #endif
 #define _MAX_INPUT_TOKENS_ 15
 
-const app_config_t load_config(const char* filename);
+app_config_t load_config(const char* filename);
 
 #endif
