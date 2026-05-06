@@ -1,6 +1,5 @@
 #include <config_loader.hpp>
 
-
 int find_ch(char* str, char ch)
 {
     int index = 0;
@@ -9,48 +8,6 @@ int find_ch(char* str, char ch)
       index += 1;
     }
     return index;
-}
-
-char** dirty_split(char* str, char ch)
-{
-    char** tokens = (char**)malloc(sizeof(char*) * _MAX_INPUT_TOKENS_);
-    char* start = str;
-    char* end;
-    int index = 1;
-    int pos = 0;
-    while ((end = strchr(start, ch)) != NULL)
-    {
-      pos = find_ch(start, ch);
-      start[pos] = '\0';
-      tokens[index] = start;
-      index += 1;
-      start = end + 1;
-    }
-    tokens[index] = start;
-    index += 1;
-    tokens[index] = NULL;
-    return tokens;
-}
-
-char** split_env(char* str, char ch)
-{
-    char** tokens = (char**)malloc(sizeof(char*) * _MAX_INPUT_TOKENS_);
-    char* start = str;
-    char* end;
-    int index = 0;
-    int pos = 0;
-    while ((end = strchr(start, ch)) != NULL && index < 1)
-    {
-      pos = find_ch(start, ch);
-      start[pos] = '\0';
-      tokens[index] = start;
-      index += 1;
-      start = end + 1;
-    }
-    tokens[index] = start;
-    index += 1;
-    tokens[index] = NULL;
-    return tokens;
 }
 
 static std::string trim(const std::string& input)
@@ -261,7 +218,7 @@ void parser(app_config_t& config, const std::string& section, const std::vector<
 }
 
 
-const app_config_t load_config(const char* filename)
+app_config_t load_config(const char* filename)
 {
     std::fstream config_file;
     config_file.open(filename);
@@ -291,7 +248,5 @@ const app_config_t load_config(const char* filename)
         }
     }
     std::cout << "success... proceding to boot rest api server..." << std::endl;
-    return (const app_config_t&)config;
+    return config;
 }
-
-
