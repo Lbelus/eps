@@ -56,3 +56,7 @@ scan_manager/data/*.db-wal
 !scan_manager/data/*.db.gz
 scan_manager/data/crawl_seen.txt
 scan_manager/data/crawl_pdfs.txt
+*.sql
+*.sql.gz
+db_backup*.sql
+db_backup*.sql.gz
