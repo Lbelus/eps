@@ -13,6 +13,21 @@ rest_api_run_dev()
     sudo docker run -it --network sqlRest -p 3004:3004 -v .:/workspace --name cont_llvm_mysql_crow img_llvm_mysql_crow /bin/bash
 }
 
+
+rest_api_backup_db()
+{
+    sudo docker exec mysqlserver \
+      sh -c 'mysqldump -u root -p"your_root_password" --single-transaction --routines --triggers test_rest_DB' \
+      > db_backup$(date +%Y%m%d_%H%M%S).sql
+}
+
+rest_api_restore_db()
+{
+    db_name=$1
+    backup_path=$2
+    mysql -u root -p $db_name < $backup_path
+}
+
 front_end_run_dev()
 {
     sudo docker run -it --network sqlRest -p 8084:3000 -v ./:/workspace --name cont_eps_front img_eps_front
@@ -294,4 +309,15 @@ go_tests()
     make repo_tests
     ctest --test-dir . --output-on-failure
     cd ..
+}
+
+re_beta()
+{
+    clear
+    cd build/
+    rm -r *
+    cmake .. -DENABLE_BETA_FLAGS=ON
+    make
+    cd ..
+    ./build/rest_api
 }

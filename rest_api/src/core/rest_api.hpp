@@ -9,9 +9,7 @@
 #include <config_loader.hpp>
 // call repos here
 
-#include <mysql_string_repository.hpp>
 #define MYSQLPP_SSQLS_NO_STATICS
-#include <example_repository.hpp>
 #include <court_doc_repository.hpp>
 #undef MYSQLPP_SSQLS_NO_STATICS
 

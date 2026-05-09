@@ -7,7 +7,6 @@
 #include <mutex>
 #include <queue>
 #include <vector>
-// #include <mysql_helpers.hpp>
 #include <crow/middlewares/cors.h>
 #include <crow.h>
 
@@ -120,9 +119,6 @@ using mysql_thread_safe_func_ptr_t = void (*)(crow::Crow<Middlewares...>&, Simpl
 template <typename... Middlewares>
 using mysql_thread_safe_cors_func_ptr_t = void (*)(crow::App<crow::CORSHandler>&, SimpleConnectionPool&);
 
-
-// typedef void (*mysql_simple_func_ptr_t) (crow::Crow<Middlewares...>&, mysqlpp::Connection&);
-// typedef void (*mysql_thread_safe_func_ptr_t) (crow::Crow<Middlewares...>&, SimpleConnectionPool&);
 
 // usage:
         // poolptr = new SimpleConnectionPool(cmdline);
