@@ -96,4 +96,21 @@ if (ENABLE_FULL_FLAGS)
         Threads::Threads
     )
 endif()
-
+if (ENABLE_BETA_FLAGS)
+    target_compile_options(rest_apiObj PRIVATE 
+    $<$<COMPILE_LANGUAGE:CXX>: -g -Wall -Wextra -Wpedantic -O2 -DNDEBUG >
+    )
+    target_compile_options(rest_api PRIVATE 
+    $<$<COMPILE_LANGUAGE:CXX>: -g -Wall -Wextra -Wpedantic -O2 -DNDEBUG >
+    )
+    target_link_options(rest_api PRIVATE -fsanitize=address)
+    target_compile_definitions(rest_api PRIVATE REPO_ENABLE_FAKE=0 REPO_FAKE_ONLY=0)
+    target_link_libraries(
+        rest_api
+        PRIVATE
+        rest_apiObj
+        ${MYSQLPP_LIB}
+        ${MYSQLCLIENT_LIB}
+        Threads::Threads
+    )
+endif()
