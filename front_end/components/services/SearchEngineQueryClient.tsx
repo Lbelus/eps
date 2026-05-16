@@ -1,35 +1,10 @@
 import React, { useMemo, useState } from "react";
 
-type RouteKey = "list" | "byId" | "pages" | "search";
-
 type Status =
   | { type: "idle"; message: string }
   | { type: "loading"; message: string }
   | { type: "success"; message: string }
   | { type: "error"; message: string };
-
-const ROUTE_OPTIONS: { key: RouteKey; label: string; description: string }[] = [
-  {
-    key: "list",
-    label: "List documents",
-    description: "GET /courtdocuments?limit=&offset=",
-  },
-  {
-    key: "byId",
-    label: "Read a document",
-    description: "GET /courtdocuments/<id>",
-  },
-  {
-    key: "pages",
-    label: "Read pages",
-    description: "GET /courtdocuments/<id>/pages",
-  },
-  {
-    key: "search",
-    label: "Search",
-    description: "GET /courtdocuments/search?q=...&limit=&offset=",
-  },
-];
 
 const toQueryString = (params: Record<string, string>) => {
   const searchParams = new URLSearchParams();
@@ -42,48 +17,8 @@ const toQueryString = (params: Record<string, string>) => {
   return query ? `?${query}` : "";
 };
 
-const buildRequestPath = (
-  route: RouteKey,
-  values: { documentId: string; limit: string; offset: string; query: string }
-) => {
-  if (route === "list") {
-    return `/courtdocuments${toQueryString({ limit: values.limit, offset: values.offset })}`;
-  }
-
-  if (route === "byId") {
-    return `/courtdocuments/${values.documentId.trim()}`;
-  }
-
-  if (route === "pages") {
-    return `/courtdocuments/${values.documentId.trim()}/pages`;
-  }
-
-  return `/courtdocuments/search${toQueryString({
-    q: values.query,
-    limit: values.limit,
-    offset: values.offset,
-  })}`;
-};
-
-const isFormValid = (
-  route: RouteKey,
-  values: { documentId: string; query: string }
-) => {
-  if (route === "byId" || route === "pages") {
-    return values.documentId.trim() !== "";
-  }
-
-  if (route === "search") {
-    return values.query.trim() !== "";
-  }
-
-  return true;
-};
-
 const SearchEngineQueryClient: React.FC = () => {
-  const [endpoint, setEndpoint] = useState("http://127.0.0.1:8080");
-  const [route, setRoute] = useState<RouteKey>("list");
-  const [documentId, setDocumentId] = useState("");
+  const endpoint = process.env.NEXT_PUBLIC_SEARCH_ENGINE_API_URL ?? "";
   const [query, setQuery] = useState("");
   const [limit, setLimit] = useState("");
   const [offset, setOffset] = useState("");
@@ -92,8 +27,13 @@ const SearchEngineQueryClient: React.FC = () => {
   const [responseBody, setResponseBody] = useState("");
 
   const requestPath = useMemo(
-    () => buildRequestPath(route, { documentId, limit, offset, query }),
-    [route, documentId, limit, offset, query]
+    () =>
+      `/courtdocuments/search${toQueryString({
+        q: query,
+        limit,
+        offset,
+      })}`,
+    [query, limit, offset]
   );
 
   const commandPreview = useMemo(() => {
@@ -103,18 +43,15 @@ const SearchEngineQueryClient: React.FC = () => {
 
   const handleSend = async () => {
     if (!endpoint.trim()) {
-      setStatus({ type: "error", message: "Please enter an API URL." });
+      setStatus({
+        type: "error",
+        message: "Missing NEXT_PUBLIC_SEARCH_ENGINE_API_URL in .env.",
+      });
       return;
     }
 
-    if (!isFormValid(route, { documentId, query })) {
-      setStatus({
-        type: "error",
-        message:
-          route === "search"
-            ? "Please enter a search term."
-            : "Please enter a document identifier.",
-      });
+    if (!query.trim()) {
+      setStatus({ type: "error", message: "Please enter a search term." });
       return;
     }
 
@@ -157,96 +94,48 @@ const SearchEngineQueryClient: React.FC = () => {
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900">
       <header className="mb-6">
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Search engine · REST requests</h1>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Search engine</h1>
         <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-          Run supported GET calls against the court document search service.
+          Search court documents.
         </p>
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
         <div className="space-y-4">
-          <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
-            Service URL
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 sm:col-span-2">
+            Search term
             <input
               type="text"
-              value={endpoint}
-              onChange={(event) => setEndpoint(event.target.value)}
-              placeholder="http://127.0.0.1:8080"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="keyword"
               className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-primary focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
             />
           </label>
 
-          <div className="grid gap-2 sm:grid-cols-2">
-            {ROUTE_OPTIONS.map((option) => (
-              <button
-                key={option.key}
-                type="button"
-                onClick={() => setRoute(option.key)}
-                className={`rounded-md border px-3 py-2 text-left text-sm transition ${
-                  route === option.key
-                    ? "border-indigo-500 bg-indigo-50 text-indigo-700 dark:border-indigo-400 dark:bg-indigo-950/60 dark:text-indigo-200"
-                    : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
-                }`}
-              >
-                <p className="font-medium">{option.label}</p>
-                <p className="mt-1 text-xs opacity-80">{option.description}</p>
-              </button>
-            ))}
-          </div>
-
           <div className="grid gap-4 sm:grid-cols-2">
-            {(route === "byId" || route === "pages") && (
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 sm:col-span-2">
-                Document ID
-                <input
-                  type="text"
-                  value={documentId}
-                  onChange={(event) => setDocumentId(event.target.value)}
-                  placeholder="123"
-                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-primary focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                />
-              </label>
-            )}
-
-            {route === "search" && (
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 sm:col-span-2">
-                Query q
-                <input
-                  type="text"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="keyword"
-                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-primary focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                />
-              </label>
-            )}
-
-            {(route === "list" || route === "search") && (
-              <>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
-                  limit
-                  <input
-                    type="number"
-                    min={0}
-                    value={limit}
-                    onChange={(event) => setLimit(event.target.value)}
-                    placeholder="50"
-                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-primary focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                  />
-                </label>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
-                  offset
-                  <input
-                    type="number"
-                    min={0}
-                    value={offset}
-                    onChange={(event) => setOffset(event.target.value)}
-                    placeholder="0"
-                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-primary focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                  />
-                </label>
-              </>
-            )}
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
+              limit
+              <input
+                type="number"
+                min={0}
+                value={limit}
+                onChange={(event) => setLimit(event.target.value)}
+                placeholder="50"
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-primary focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              />
+            </label>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
+              offset
+              <input
+                type="number"
+                min={0}
+                value={offset}
+                onChange={(event) => setOffset(event.target.value)}
+                placeholder="0"
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-primary focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              />
+            </label>
           </div>
 
           <button
@@ -254,7 +143,7 @@ const SearchEngineQueryClient: React.FC = () => {
             onClick={handleSend}
             className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500"
           >
-            Run request
+            Search
           </button>
 
           <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950">
