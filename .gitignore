@@ -60,6 +60,11 @@ scan_manager/data/doj_session_state.json
 # REST API build artifacts (cmake/make output, produced inside the build container)
 rest_api/build/
 
+# Front-end build artifacts from next-sitemap (postbuild script in package.json)
+front_end/public/robots.txt
+front_end/public/sitemap.xml
+front_end/public/sitemap-*.xml
+
 # Local secret files. Never commit any .env (only .env.example).
 .env
 .env.local
