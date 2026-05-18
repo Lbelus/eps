@@ -5,7 +5,8 @@
 
 server:
   host: mysqlserver
-  bind_addr: 127.0.0.1
+  # bind_addr: 127.0.0.1   # use loopback only when nginx and rest_api run on the SAME host (path A)
+  # bind_addr: 0.0.0.0     # default when omitted; required when the API runs inside a container and nginx reaches it via published port or service name
   port: 3004
   threads: 4
   allowed_origins: https://eps.example.com
