@@ -1,7 +1,7 @@
 import React from "react";
 import Container from "./container";
 
-const SectionTitle = (props: { align: string; pretitle: string | number | bigint | boolean | React.ReactElement<any, string | React.JSXElementConstructor<any>> | Iterable<React.ReactNode> | React.ReactPortal | Promise<React.AwaitedReactNode>; title: string | number | bigint | boolean | React.ReactElement<any, string | React.JSXElementConstructor<any>> | Iterable<React.ReactNode> | React.ReactPortal | Promise<React.AwaitedReactNode>; children: string | number | bigint | boolean | React.ReactElement<any, string | React.JSXElementConstructor<any>> | Iterable<React.ReactNode> | React.ReactPortal | Promise<React.AwaitedReactNode>; }) => {
+const SectionTitle = (props: { align: string; pretitle?: React.ReactNode; title?: React.ReactNode; children?: React.ReactNode }) => {
   return (
     <Container
       className={`flex w-full flex-col mt-4 ${
