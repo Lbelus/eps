@@ -10,7 +10,7 @@ int main()
             NULL
     };
 
-    thread_safe_cors_api(creds, func_ptr_arr, config.server.port, config.server.allowed_origins.c_str());
+    thread_safe_cors_api(creds, func_ptr_arr, config.server.port, config.server.allowed_origins.c_str(), config.server.bind_addr.c_str());
     free_mysql_credentials((mysql_connection_t*)creds);
     return EXIT_SUCCESS;
 }

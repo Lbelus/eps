@@ -5,9 +5,10 @@
 
 server:
   host: mysqlserver
+  bind_addr: 127.0.0.1
   port: 3004
   threads: 4
-  allowed_origins: http://192.168.1.20:8084
+  allowed_origins: https://eps.example.com
 
 mysql:
   host: test_rest_DB
