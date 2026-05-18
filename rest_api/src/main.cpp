@@ -3,7 +3,7 @@
 int main()
 {
     app_config_t config = load_config("./config.yaml");
-    const mysql_connection_t* creds = allocate_mysql_credentials(config.mysql.host.c_str(), config.server.host.c_str(), config.mysql.user.c_str(), config.mysql.password.c_str());
+    const mysql_connection_t* creds = allocate_mysql_credentials(config.mysql.database.c_str(), config.mysql.host.c_str(), config.mysql.user.c_str(), config.mysql.password.c_str());
     mysql_thread_safe_cors_func_ptr_t<> func_ptr_arr[] = 
     {
             &mysqlCourtDocuments_routes,

@@ -4,7 +4,8 @@
 #   key: value
 
 server:
-  host: mysqlserver
+  # host: external API hostname (informational; not currently consumed at runtime).
+  host: api.eps.example.com
   # bind_addr: 127.0.0.1   # use loopback only when nginx and rest_api run on the SAME host (path A)
   # bind_addr: 0.0.0.0     # default when omitted; required when the API runs inside a container and nginx reaches it via published port or service name
   port: 3004
@@ -12,9 +13,12 @@ server:
   allowed_origins: https://eps.example.com
 
 mysql:
-  host: test_rest_DB
-  port: 18080
+  # host = MySQL server hostname (Docker service name when in sqlRest network).
+  host: mysqlserver
+  port: 3306
   user: dev_admin
+  # Treated as the name of an env var: the loader looks up that var at startup
+  # so the actual password never lives in this file. See rest_api/.env.example.
   password: MYSQL_PASSWORD
-  database: rest_api
+  database: test_rest_DB
   pool_size: 8
