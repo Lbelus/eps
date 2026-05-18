@@ -57,3 +57,6 @@ scan_manager/data/*.db-wal
 scan_manager/data/crawl_seen.txt
 scan_manager/data/crawl_pdfs.txt
 scan_manager/data/doj_session_state.json
+
+# REST API build artifacts (cmake/make output, produced inside the build container)
+rest_api/build/
