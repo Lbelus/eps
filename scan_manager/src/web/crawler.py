@@ -634,47 +634,52 @@ def crawl(headless: bool = True, sources: list[str] = None):
 
 
 def _download_via_playwright(doc_url: str, dest: Path, pw_page) -> bool:
-    """Download a file using Playwright's download handling."""
+    """Download a DOJ document.
+
+    Most justice.gov disclosure PDFs are served with
+    Content-Disposition: attachment, which makes Playwright's page.goto()
+    raise "Download is starting" before we can extract anything. So:
+
+      1. Try a plain requests.get() with the cookies the browser already
+         holds. This is what works for nearly every direct PDF URL and
+         avoids driving Chromium per-file.
+      2. If the response was HTML (download_file() deletes those and
+         returns False), the URL is probably an age gate / interstitial.
+         Drive Chromium, click through #age-button-yes, and capture the
+         download triggered by the click.
+    """
+    cookies = pw_page.context.cookies()
+    cookie_dict = {c["name"]: c["value"] for c in cookies}
+
+    if download_file(doc_url, dest, cookie_dict):
+        return True
+
+    # Fall back: render the URL, look for an age gate, click it, capture download.
     try:
-        # Use expect_download on the PAGE to catch browser-triggered downloads
-        with pw_page.expect_download(timeout=60_000) as dl_info:
-            pw_page.goto(doc_url, wait_until="commit", timeout=30_000)
-        dl = dl_info.value
-        dl.save_as(dest)
-        if dest.exists() and dest.stat().st_size > 0:
-            return True
-        return False
+        pw_page.goto(doc_url, wait_until="domcontentloaded", timeout=30_000)
     except Exception:
-        pass
-
-    # Fallback: the URL might render as a page (age gate, HTML response)
-    try:
-        resp = pw_page.goto(doc_url, wait_until="domcontentloaded", timeout=30_000)
-
-        # Click through age gate if present
-        age_btn = pw_page.query_selector("#age-button-yes")
-        if age_btn:
-            print(f"    [age gate] clicking Yes...")
-            age_btn.click()
-            # After clicking, a download may start
-            try:
-                with pw_page.expect_download(timeout=15_000) as dl_info:
-                    pass
-                dl = dl_info.value
-                dl.save_as(dest)
-                if dest.exists() and dest.stat().st_size > 0:
-                    return True
-            except Exception:
-                pass
-
-        # Last resort: use browser cookies with requests
+        # goto raised (e.g. Download is starting). Re-pull cookies in case the
+        # server set new ones in the abortive response, then retry the HTTP path.
         cookies = pw_page.context.cookies()
         cookie_dict = {c["name"]: c["value"] for c in cookies}
         return download_file(doc_url, dest, cookie_dict)
 
-    except Exception as e:
-        print(f"    [playwright error] {e}")
-        return False
+    age_btn = pw_page.query_selector("#age-button-yes")
+    if age_btn:
+        print(f"    [age gate] clicking Yes...")
+        try:
+            with pw_page.expect_download(timeout=30_000) as dl_info:
+                age_btn.click()
+            dl_info.value.save_as(str(dest))
+            return dest.exists() and dest.stat().st_size > 0
+        except Exception as e:
+            print(f"    [age gate download error] {e}")
+
+    # Page rendered something else (or no age gate); try requests one more time
+    # with whatever cookies the page picked up.
+    cookies = pw_page.context.cookies()
+    cookie_dict = {c["name"]: c["value"] for c in cookies}
+    return download_file(doc_url, dest, cookie_dict)
 
 
 def _download_batch(
