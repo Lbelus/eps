@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Wrapper for the EPS scan_manager crawler + ingest pipeline.
+# Wrapper for the EPS scan_manager crawler + ingest + migrate pipeline.
 # Activates the local .venv, then dispatches to a subcommand.
 #
 # Usage:
@@ -10,11 +10,16 @@
 #   ./crawl.sh dc                # DocumentCloud only
 #   ./crawl.sh reset             # clear progress and session state
 #   ./crawl.sh ingest [workers]  # OCR data/input/ into data/epstein.db
+#   ./crawl.sh migrate           # copy data/epstein.db -> MySQL (rest_api)
+#   ./crawl.sh pipeline [source] # crawl <source|all> -> ingest -> migrate
 #   ./crawl.sh search "phrase"   # full-text search
 #   ./crawl.sh help              # this message
 #
 # Extra flags to the crawler can be passed after the subcommand, e.g.
 #   ./crawl.sh doj --headless false
+#
+# Migration reads MySQL config from env (MYSQL_HOST/PORT/USER/PASSWORD/DATABASE),
+# defaults to 127.0.0.1:3306 / dev_admin / test_rest_DB.
 
 set -euo pipefail
 
@@ -31,7 +36,26 @@ if [[ ! -x "$VENV_PYTHON" ]]; then
 fi
 
 usage() {
-    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+run_crawl() {
+    local source_arg="${1:-all}"
+    case "$source_arg" in
+        all)             "$VENV_PYTHON" -m src.web.crawler ;;
+        doj)             "$VENV_PYTHON" -m src.web.crawler --source doj ;;
+        cl|courtlistener) "$VENV_PYTHON" -m src.web.crawler --source courtlistener ;;
+        dc|documentcloud) "$VENV_PYTHON" -m src.web.crawler --source documentcloud ;;
+        *) echo "error: unknown pipeline source: $source_arg" >&2; exit 2 ;;
+    esac
+}
+
+run_ingest() {
+    "$VENV_PYTHON" src/main.py --mode ingest "$@"
+}
+
+run_migrate() {
+    "$VENV_PYTHON" -m src.utils.migration_script "$@"
 }
 
 cmd="${1:-help}"
@@ -58,12 +82,29 @@ case "$cmd" in
         ;;
     ingest)
         workers="${1:-}"
-        if [[ -n "$workers" ]]; then
+        if [[ -n "$workers" && "$workers" != -* ]]; then
             shift
             exec "$VENV_PYTHON" src/main.py --mode ingest --workers "$workers" "$@"
         else
             exec "$VENV_PYTHON" src/main.py --mode ingest "$@"
         fi
+        ;;
+    migrate)
+        exec "$VENV_PYTHON" -m src.utils.migration_script "$@"
+        ;;
+    pipeline)
+        source_arg="${1:-all}"
+        shift || true
+        echo "=== crawl ($source_arg) ==="
+        run_crawl "$source_arg"
+        echo
+        echo "=== ingest ==="
+        run_ingest
+        echo
+        echo "=== migrate ==="
+        run_migrate
+        echo
+        echo "=== pipeline done ==="
         ;;
     search)
         if [[ $# -eq 0 ]]; then
