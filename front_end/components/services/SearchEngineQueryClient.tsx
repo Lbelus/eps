@@ -80,8 +80,11 @@ const isFormValid = (
   return true;
 };
 
+const DEFAULT_REST_API_URL =
+  process.env.NEXT_PUBLIC_REST_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:3004";
+
 const SearchEngineQueryClient: React.FC = () => {
-  const [endpoint, setEndpoint] = useState("http://127.0.0.1:8080");
+  const [endpoint, setEndpoint] = useState(DEFAULT_REST_API_URL);
   const [route, setRoute] = useState<RouteKey>("list");
   const [documentId, setDocumentId] = useState("");
   const [query, setQuery] = useState("");
@@ -171,7 +174,7 @@ const SearchEngineQueryClient: React.FC = () => {
               type="text"
               value={endpoint}
               onChange={(event) => setEndpoint(event.target.value)}
-              placeholder="http://127.0.0.1:8080"
+              placeholder={DEFAULT_REST_API_URL}
               className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-primary focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
             />
           </label>
