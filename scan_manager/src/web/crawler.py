@@ -57,7 +57,6 @@ sys.stderr.reconfigure(line_buffering=True)
 CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 DATA_DIR   = Path(__file__).resolve().parents[2] / "data"
 OUTPUT_DIR = DATA_DIR / "input"
-SEEN_FILE  = DATA_DIR / "crawl_seen.txt"
 PDF_LOG    = DATA_DIR / "crawl_pdfs.txt"
 STATE_FILE = DATA_DIR / "doj_session_state.json"
 
@@ -335,9 +334,15 @@ def download_file(url: str, dest: Path, session_cookies: dict = None) -> bool:
 # Source 1: DOJ disclosure tree walk
 # ---------------------------------------------------------------------------
 
-def crawl_doj(pw_page, context, seen_pages: set, seen_docs: set) -> set:
-    """Walk justice.gov/epstein/doj-disclosures and return discovered doc URLs."""
+def crawl_doj(pw_page, context, seen_docs: set) -> set:
+    """Walk justice.gov/epstein/doj-disclosures and return discovered doc URLs.
+
+    Visited-section tracking is process-local: every run retraverses the full
+    tree so newly-published sections are picked up. Download dedup is still
+    handled by the persistent PDF_LOG via seen_docs.
+    """
     queue = [BASE_URL + DISCLOSURE_ROOT]
+    visited: set[str] = set()
     doc_urls: set[str] = set()
 
     print(f"\n{'='*60}")
@@ -346,7 +351,7 @@ def crawl_doj(pw_page, context, seen_pages: set, seen_docs: set) -> set:
 
     while queue:
         page_url = queue.pop(0)
-        if page_url in seen_pages:
+        if page_url in visited:
             continue
 
         print(f"  SECTION: {page_url.replace(BASE_URL, '')}")
@@ -355,12 +360,11 @@ def crawl_doj(pw_page, context, seen_pages: set, seen_docs: set) -> set:
             pw_page.wait_for_timeout(1_500)
         except Exception as e:
             print(f"    [nav error] {e}")
-            seen_pages.add(page_url)
-            append_line(SEEN_FILE, page_url)
+            visited.add(page_url)
             continue
 
         sections, docs = extract_links(pw_page, page_url)
-        new_sections = [s for s in sections if s not in seen_pages and s not in queue]
+        new_sections = [s for s in sections if s not in visited and s not in queue]
         new_docs     = [d for d in docs     if d not in seen_docs]
 
         queue.extend(new_sections)
@@ -369,11 +373,10 @@ def crawl_doj(pw_page, context, seen_pages: set, seen_docs: set) -> set:
         if new_docs:
             print(f"    -> {len(new_docs)} new docs  |  queue: {len(queue)}  |  total: {len(doc_urls)}")
 
-        seen_pages.add(page_url)
-        append_line(SEEN_FILE, page_url)
+        visited.add(page_url)
         time.sleep(PAGE_DELAY)
 
-    print(f"[DOJ] {len(doc_urls)} documents found")
+    print(f"[DOJ] {len(doc_urls)} documents found  |  {len(visited)} sections visited")
     return doc_urls
 
 
@@ -550,7 +553,6 @@ def crawl(headless: bool = True, sources: list[str] = None):
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    seen_pages = load_set(SEEN_FILE)
     seen_docs  = load_set(PDF_LOG)
 
     subjects = load_subjects()
@@ -577,7 +579,7 @@ def crawl(headless: bool = True, sources: list[str] = None):
                 if "courtlistener" not in sources and "documentcloud" not in sources:
                     return
             else:
-                doj_docs = crawl_doj(pw_page, context, seen_pages, seen_docs)
+                doj_docs = crawl_doj(pw_page, context, seen_docs)
                 all_doc_urls.update(doj_docs)
 
                 # Save session cookies for DOJ downloads
@@ -746,7 +748,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.reset:
-        for f in (SEEN_FILE, PDF_LOG, STATE_FILE):
+        # crawl_seen.txt is no longer written, but clean it up if a previous run left one.
+        for f in (PDF_LOG, STATE_FILE, DATA_DIR / "crawl_seen.txt"):
             if f.exists():
                 f.unlink()
         print("[reset] progress cleared")
