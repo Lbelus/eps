@@ -1,31 +1,28 @@
 import React from "react";
 import Container from "./container";
 
-const SectionTitle = (props: { align: string; pretitle?: React.ReactNode; title?: React.ReactNode; children?: React.ReactNode }) => {
-  return (
-    <Container
-      className={`flex w-full flex-col mt-4 ${
-        props.align === "left" ? "" : "items-center justify-center text-center"
-      }`}>
-      {props.pretitle && (
-        <div className="text-sm font-bold tracking-wider uppercase text-slate-600">
-          {props.pretitle}
-        </div>
-      )}
+type SectionTitleProps = React.PropsWithChildren<{
+  align?: "left" | "center";
+  pretitle?: React.ReactNode;
+  title?: React.ReactNode;
+}>;
 
-      {props.title && (
+const SectionTitle = ({ align = "center", pretitle, title, children }: SectionTitleProps) => {
+  return (
+    <Container className={`flex w-full flex-col mt-4 ${align === "left" ? "" : "items-center justify-center text-center"}`}>
+      {pretitle && <div className="text-sm font-bold tracking-wider uppercase text-slate-600">{pretitle}</div>}
+
+      {title && (
         <h2 className="max-w-2xl mt-3 text-3xl font-bold leading-snug tracking-tight text-gray-800 lg:leading-tight lg:text-4xl dark:text-white">
-          {props.title}
+          {title}
         </h2>
       )}
 
-      {props.children && (
-        <div className="max-w-2xl py-4 text-lg leading-normal text-gray-500 lg:text-xl xl:text-xl dark:text-gray-300">
-          {props.children}
-        </div>
+      {children && (
+        <div className="max-w-2xl py-4 text-lg leading-normal text-gray-500 lg:text-xl xl:text-xl dark:text-gray-300">{children}</div>
       )}
     </Container>
   );
-}
+};
 
 export default SectionTitle;

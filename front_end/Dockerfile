@@ -26,9 +26,6 @@ RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
 # Install Yarn
 RUN npm install -g yarn
 
-# Install supabase
-# RUN npm install @supabase/supabase-js
-
 EXPOSE 3000
 
 ENV DEBIAN_FRONTEND=
