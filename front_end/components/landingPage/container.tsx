@@ -1,14 +1,11 @@
 import React from "react";
 
-const Container = (props: { className: any; children: string | number | bigint | boolean | React.ReactElement<any, string | React.JSXElementConstructor<any>> | Iterable<React.ReactNode> | React.ReactPortal | Promise<React.AwaitedReactNode>; }) => {
-  return (
-    <div
-      className={`container p-8 mx-auto xl:px-0 ${
-        props.className ? props.className : ""
-      }`}>
-      {props.children}
-    </div>
-  );
-}
+type ContainerProps = React.PropsWithChildren<{
+  className?: string;
+}>;
+
+const Container = ({ className = "", children }: ContainerProps) => {
+  return <div className={`container p-8 mx-auto xl:px-0 ${className}`}>{children}</div>;
+};
 
 export default Container;

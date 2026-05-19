@@ -1,7 +1,6 @@
 import React from "react";
 import Head from "next/head";
 import Link from "next/link";
-import LogIn from "../components/session/login-btn";
 import HeroLogIn from "../components/session/hero-login-btn";
 import Footer from "@/components/landingPage/footer";
 import PopupWidget from "../components/landingPage/popupWidget";
@@ -16,7 +15,7 @@ export default function Home() {
           name="description"
           content="EPS is a court document search engine and viewer focused on the Jeffrey Epstein court case."
         />
-        <link rel="icon" href="/favicon.ico" />
+        <link rel="icon" href="/eps-favicon.svg" type="image/svg+xml" />
       </Head>
 
       <header className="bg-[#f8f5f0] border-b border-slate-200 p-4 dark:border-slate-700 dark:bg-slate-950">
@@ -25,7 +24,6 @@ export default function Home() {
             EPS
           </Link>
           <div className="hidden lg:block text-slate-700">
-            <LogIn />
             <ThemeChanger />
           </div>
         </nav>
