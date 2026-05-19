@@ -11,10 +11,13 @@ associated individuals across multiple public sources:
 Search subjects are defined in config/search_subjects.yaml.
 
 Usage:
-    python -m src.web.crawler                        # full run (all sources)
-    python -m src.web.crawler --source doj           # DOJ tree only
-    python -m src.web.crawler --source courtlistener # CourtListener only
-    python -m src.web.crawler --source documentcloud # DocumentCloud only
+    python -m src.web.crawler --prime                 # one-time: open headed browser,
+                                                       # solve any age gate / queue,
+                                                       # save session for reuse.
+    python -m src.web.crawler                         # full run (all sources)
+    python -m src.web.crawler --source doj            # DOJ tree only
+    python -m src.web.crawler --source courtlistener  # CourtListener only
+    python -m src.web.crawler --source documentcloud  # DocumentCloud only
     python -m src.web.crawler --headless false        # show browser window
     python -m src.web.crawler --reset                 # clear progress and restart
 """
@@ -32,6 +35,18 @@ import requests
 import yaml
 from playwright.sync_api import sync_playwright
 
+# playwright-stealth: optional but recommended for the DOJ source.
+# Supports both the legacy module-level stealth_sync() and the newer Stealth() class.
+_STEALTH_FN = None
+try:
+    from playwright_stealth import stealth_sync as _STEALTH_FN  # legacy API
+except ImportError:
+    try:
+        from playwright_stealth import Stealth
+        _STEALTH_FN = Stealth().apply_stealth_sync  # newer API
+    except ImportError:
+        _STEALTH_FN = None
+
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 
@@ -42,8 +57,8 @@ sys.stderr.reconfigure(line_buffering=True)
 CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 DATA_DIR   = Path(__file__).resolve().parents[2] / "data"
 OUTPUT_DIR = DATA_DIR / "input"
-SEEN_FILE  = DATA_DIR / "crawl_seen.txt"
 PDF_LOG    = DATA_DIR / "crawl_pdfs.txt"
+STATE_FILE = DATA_DIR / "doj_session_state.json"
 
 # ---------------------------------------------------------------------------
 # Search subjects
@@ -70,13 +85,7 @@ def build_search_terms(subjects: dict) -> list[str]:
 
 BASE_URL        = "https://www.justice.gov"
 DISCLOSURE_ROOT = "/epstein/doj-disclosures"
-
-QUEUE_IT_COOKIE_NAME  = "QueueITAccepted-SDFrts345E-V3_usdojsearch"
-QUEUE_IT_COOKIE_VALUE = (
-    "EventId%3Dusdojsearch%26RedirectType%3Dsafetynet"
-    "%26IssueTime%3D1773594786"
-    "%26Hash%3Dcda37fddf24c0964e9f6a5b41af6ef8389e78e6f0c505158790393444a0c8221"
-)
+PRIME_URL       = BASE_URL + "/epstein"
 
 UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -84,6 +93,35 @@ UA = (
     "Chrome/122.0.0.0 Safari/537.36"
 )
 HEADERS = {"User-Agent": UA, "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"}
+
+# Markers that suggest the page Akamai/Queue-It returned is a challenge, not content.
+CHALLENGE_MARKERS = (
+    "Just a moment",
+    "Verifying you are human",
+    "queue-it",
+    "queue.justice.gov",
+    "Access Denied",
+    "Pardon Our Interruption",
+)
+
+# Init script: pad the bot-detection surface beyond just webdriver.
+# Run before any page script. Defensible posture for public-records research,
+# not a challenge solver.
+STEALTH_INIT_SCRIPT = """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+Object.defineProperty(navigator, 'plugins',   { get: () => [1, 2, 3, 4, 5] });
+Object.defineProperty(navigator, 'platform',  { get: () => 'MacIntel' });
+window.chrome = window.chrome || { runtime: {} };
+const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
+if (originalQuery) {
+    window.navigator.permissions.query = (parameters) => (
+        parameters.name === 'notifications'
+            ? Promise.resolve({ state: Notification.permission })
+            : originalQuery(parameters)
+    );
+}
+"""
 
 PAGE_DELAY     = 0.8
 DOWNLOAD_DELAY = 1.0
@@ -103,6 +141,104 @@ def load_set(path: Path) -> set:
 def append_line(path: Path, value: str):
     with open(path, "a", encoding="utf-8") as f:
         f.write(value + "\n")
+
+# ---------------------------------------------------------------------------
+# DOJ session helpers
+# ---------------------------------------------------------------------------
+
+def apply_stealth(page) -> None:
+    """Apply playwright-stealth fingerprint patches to a page, if installed."""
+    if _STEALTH_FN is None:
+        return
+    try:
+        _STEALTH_FN(page)
+    except Exception as e:
+        print(f"    [stealth warning] {e}")
+
+
+def page_looks_like_challenge(page) -> bool:
+    """Return True if the current page appears to be a bot/queue challenge."""
+    try:
+        title = (page.title() or "").strip()
+        body  = page.content()[:4000]
+    except Exception:
+        return False
+    if any(m.lower() in title.lower() for m in CHALLENGE_MARKERS):
+        return True
+    if any(m in body for m in CHALLENGE_MARKERS):
+        return True
+    return False
+
+
+def build_doj_context(browser, accept_downloads: bool = True):
+    """Create a browser context, loading saved DOJ storage state if available."""
+    kwargs = dict(user_agent=UA, accept_downloads=accept_downloads)
+    if STATE_FILE.exists():
+        kwargs["storage_state"] = str(STATE_FILE)
+        print(f"[session] loaded {STATE_FILE.name}")
+    else:
+        print(f"[session] no saved state at {STATE_FILE.name} — run --prime first if Akamai blocks")
+    context = browser.new_context(**kwargs)
+    context.add_init_script(STEALTH_INIT_SCRIPT)
+    return context
+
+
+def warmup_doj(page, max_attempts: int = 3) -> bool:
+    """Navigate to PRIME_URL with retry/back-off. Returns True if the page is content (not a challenge)."""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            print(f"[warmup] {PRIME_URL} (attempt {attempt}/{max_attempts})")
+            page.goto(PRIME_URL, wait_until="networkidle", timeout=45_000)
+            page.wait_for_timeout(3_000)
+        except Exception as e:
+            print(f"    [warmup error] {e}")
+            time.sleep(2 * attempt)
+            continue
+        if page_looks_like_challenge(page):
+            print(f"    [warmup] challenge page detected, backing off...")
+            time.sleep(4 * attempt)
+            continue
+        return True
+    return False
+
+
+def prime_session(headless: bool = False) -> int:
+    """One-time interactive prime: open a real browser, let the user solve any gate, save state."""
+    print(f"\n{'='*60}")
+    print(f"[prime] opening {PRIME_URL} in a {'headless' if headless else 'headed'} browser")
+    print(f"[prime] solve any age gate / queue, then return here and press Enter")
+    print(f"{'='*60}\n")
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=headless,
+            args=["--disable-blink-features=AutomationControlled"],
+        )
+        context = browser.new_context(user_agent=UA, accept_downloads=True)
+        context.add_init_script(STEALTH_INIT_SCRIPT)
+        page = context.new_page()
+        apply_stealth(page)
+
+        try:
+            page.goto(PRIME_URL, wait_until="domcontentloaded", timeout=60_000)
+        except Exception as e:
+            print(f"[prime] navigation error: {e}")
+
+        try:
+            input("Press Enter once the disclosure page is fully loaded and content is visible... ")
+        except EOFError:
+            pass
+
+        if page_looks_like_challenge(page):
+            print("[prime] page still looks like a challenge — state will NOT be saved")
+            browser.close()
+            return 1
+
+        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        context.storage_state(path=str(STATE_FILE))
+        print(f"[prime] saved session state to {STATE_FILE}")
+        browser.close()
+    return 0
 
 # ---------------------------------------------------------------------------
 # Link extraction (DOJ)
@@ -198,9 +334,15 @@ def download_file(url: str, dest: Path, session_cookies: dict = None) -> bool:
 # Source 1: DOJ disclosure tree walk
 # ---------------------------------------------------------------------------
 
-def crawl_doj(pw_page, context, seen_pages: set, seen_docs: set) -> set:
-    """Walk justice.gov/epstein/doj-disclosures and return discovered doc URLs."""
+def crawl_doj(pw_page, context, seen_docs: set) -> set:
+    """Walk justice.gov/epstein/doj-disclosures and return discovered doc URLs.
+
+    Visited-section tracking is process-local: every run retraverses the full
+    tree so newly-published sections are picked up. Download dedup is still
+    handled by the persistent PDF_LOG via seen_docs.
+    """
     queue = [BASE_URL + DISCLOSURE_ROOT]
+    visited: set[str] = set()
     doc_urls: set[str] = set()
 
     print(f"\n{'='*60}")
@@ -209,7 +351,7 @@ def crawl_doj(pw_page, context, seen_pages: set, seen_docs: set) -> set:
 
     while queue:
         page_url = queue.pop(0)
-        if page_url in seen_pages:
+        if page_url in visited:
             continue
 
         print(f"  SECTION: {page_url.replace(BASE_URL, '')}")
@@ -218,12 +360,11 @@ def crawl_doj(pw_page, context, seen_pages: set, seen_docs: set) -> set:
             pw_page.wait_for_timeout(1_500)
         except Exception as e:
             print(f"    [nav error] {e}")
-            seen_pages.add(page_url)
-            append_line(SEEN_FILE, page_url)
+            visited.add(page_url)
             continue
 
         sections, docs = extract_links(pw_page, page_url)
-        new_sections = [s for s in sections if s not in seen_pages and s not in queue]
+        new_sections = [s for s in sections if s not in visited and s not in queue]
         new_docs     = [d for d in docs     if d not in seen_docs]
 
         queue.extend(new_sections)
@@ -232,11 +373,10 @@ def crawl_doj(pw_page, context, seen_pages: set, seen_docs: set) -> set:
         if new_docs:
             print(f"    -> {len(new_docs)} new docs  |  queue: {len(queue)}  |  total: {len(doc_urls)}")
 
-        seen_pages.add(page_url)
-        append_line(SEEN_FILE, page_url)
+        visited.add(page_url)
         time.sleep(PAGE_DELAY)
 
-    print(f"[DOJ] {len(doc_urls)} documents found")
+    print(f"[DOJ] {len(doc_urls)} documents found  |  {len(visited)} sections visited")
     return doc_urls
 
 
@@ -413,7 +553,6 @@ def crawl(headless: bool = True, sources: list[str] = None):
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    seen_pages = load_set(SEEN_FILE)
     seen_docs  = load_set(PDF_LOG)
 
     subjects = load_subjects()
@@ -429,40 +568,41 @@ def crawl(headless: bool = True, sources: list[str] = None):
                 headless=headless,
                 args=["--disable-blink-features=AutomationControlled"],
             )
-            context = browser.new_context(user_agent=UA, accept_downloads=True)
-            context.add_init_script(
-                'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-            )
-            context.add_cookies([{
-                "name":   QUEUE_IT_COOKIE_NAME,
-                "value":  QUEUE_IT_COOKIE_VALUE,
-                "domain": ".justice.gov",
-                "path":   "/",
-            }])
-
+            context = build_doj_context(browser)
             pw_page = context.new_page()
+            apply_stealth(pw_page)
 
-            print(f"[warmup] {BASE_URL}/epstein")
-            pw_page.goto(f"{BASE_URL}/epstein", wait_until="networkidle", timeout=45_000)
-            pw_page.wait_for_timeout(4_000)
+            if not warmup_doj(pw_page):
+                print("[doj] warmup failed — page still looks like a challenge.")
+                print("[doj] re-prime the session:  python -m src.web.crawler --prime")
+                browser.close()
+                if "courtlistener" not in sources and "documentcloud" not in sources:
+                    return
+            else:
+                doj_docs = crawl_doj(pw_page, context, seen_docs)
+                all_doc_urls.update(doj_docs)
 
-            doj_docs = crawl_doj(pw_page, context, seen_pages, seen_docs)
-            all_doc_urls.update(doj_docs)
+                # Save session cookies for DOJ downloads
+                doj_cookies = {c["name"]: c["value"] for c in context.cookies()}
 
-            # Save session cookies for DOJ downloads
-            doj_cookies = {c["name"]: c["value"] for c in context.cookies()}
+                # ---- DOJ downloads (inside Playwright context for retry) ----
+                doj_new = doj_docs - seen_docs
+                if doj_new:
+                    print(f"\n[download] {len(doj_new)} DOJ documents...")
+                    downloaded = _download_batch(
+                        sorted(doj_new), seen_docs, doj_cookies,
+                        prefix="", pw_page=pw_page, context=context,
+                    )
+                    print(f"[download] {downloaded} DOJ files saved")
 
-            # ---- DOJ downloads (inside Playwright context for retry) ----
-            doj_new = doj_docs - seen_docs
-            if doj_new:
-                print(f"\n[download] {len(doj_new)} DOJ documents...")
-                downloaded = _download_batch(
-                    sorted(doj_new), seen_docs, doj_cookies,
-                    prefix="", pw_page=pw_page, context=context,
-                )
-                print(f"[download] {downloaded} DOJ files saved")
+                # Persist any refreshed cookies/state for the next run.
+                try:
+                    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                    context.storage_state(path=str(STATE_FILE))
+                except Exception as e:
+                    print(f"[session] could not save state: {e}")
 
-            browser.close()
+                browser.close()
 
     # ---- Source 2: CourtListener ----
     if "courtlistener" in sources:
@@ -494,47 +634,52 @@ def crawl(headless: bool = True, sources: list[str] = None):
 
 
 def _download_via_playwright(doc_url: str, dest: Path, pw_page) -> bool:
-    """Download a file using Playwright's download handling."""
+    """Download a DOJ document.
+
+    Most justice.gov disclosure PDFs are served with
+    Content-Disposition: attachment, which makes Playwright's page.goto()
+    raise "Download is starting" before we can extract anything. So:
+
+      1. Try a plain requests.get() with the cookies the browser already
+         holds. This is what works for nearly every direct PDF URL and
+         avoids driving Chromium per-file.
+      2. If the response was HTML (download_file() deletes those and
+         returns False), the URL is probably an age gate / interstitial.
+         Drive Chromium, click through #age-button-yes, and capture the
+         download triggered by the click.
+    """
+    cookies = pw_page.context.cookies()
+    cookie_dict = {c["name"]: c["value"] for c in cookies}
+
+    if download_file(doc_url, dest, cookie_dict):
+        return True
+
+    # Fall back: render the URL, look for an age gate, click it, capture download.
     try:
-        # Use expect_download on the PAGE to catch browser-triggered downloads
-        with pw_page.expect_download(timeout=60_000) as dl_info:
-            pw_page.goto(doc_url, wait_until="commit", timeout=30_000)
-        dl = dl_info.value
-        dl.save_as(dest)
-        if dest.exists() and dest.stat().st_size > 0:
-            return True
-        return False
+        pw_page.goto(doc_url, wait_until="domcontentloaded", timeout=30_000)
     except Exception:
-        pass
-
-    # Fallback: the URL might render as a page (age gate, HTML response)
-    try:
-        resp = pw_page.goto(doc_url, wait_until="domcontentloaded", timeout=30_000)
-
-        # Click through age gate if present
-        age_btn = pw_page.query_selector("#age-button-yes")
-        if age_btn:
-            print(f"    [age gate] clicking Yes...")
-            age_btn.click()
-            # After clicking, a download may start
-            try:
-                with pw_page.expect_download(timeout=15_000) as dl_info:
-                    pass
-                dl = dl_info.value
-                dl.save_as(dest)
-                if dest.exists() and dest.stat().st_size > 0:
-                    return True
-            except Exception:
-                pass
-
-        # Last resort: use browser cookies with requests
+        # goto raised (e.g. Download is starting). Re-pull cookies in case the
+        # server set new ones in the abortive response, then retry the HTTP path.
         cookies = pw_page.context.cookies()
         cookie_dict = {c["name"]: c["value"] for c in cookies}
         return download_file(doc_url, dest, cookie_dict)
 
-    except Exception as e:
-        print(f"    [playwright error] {e}")
-        return False
+    age_btn = pw_page.query_selector("#age-button-yes")
+    if age_btn:
+        print(f"    [age gate] clicking Yes...")
+        try:
+            with pw_page.expect_download(timeout=30_000) as dl_info:
+                age_btn.click()
+            dl_info.value.save_as(str(dest))
+            return dest.exists() and dest.stat().st_size > 0
+        except Exception as e:
+            print(f"    [age gate download error] {e}")
+
+    # Page rendered something else (or no age gate); try requests one more time
+    # with whatever cookies the page picked up.
+    cookies = pw_page.context.cookies()
+    cookie_dict = {c["name"]: c["value"] for c in cookies}
+    return download_file(doc_url, dest, cookie_dict)
 
 
 def _download_batch(
@@ -598,16 +743,24 @@ if __name__ == "__main__":
     parser.add_argument("--headless", default="true", help="true/false")
     parser.add_argument("--reset", action="store_true", help="clear progress and restart")
     parser.add_argument(
+        "--prime", action="store_true",
+        help="open a headed browser to solve any age gate / queue, save the session, then exit",
+    )
+    parser.add_argument(
         "--source", default="all",
         help=f"comma-separated sources: {', '.join(VALID_SOURCES)}, or 'all'",
     )
     args = parser.parse_args()
 
     if args.reset:
-        for f in (SEEN_FILE, PDF_LOG):
+        # crawl_seen.txt is no longer written, but clean it up if a previous run left one.
+        for f in (PDF_LOG, STATE_FILE, DATA_DIR / "crawl_seen.txt"):
             if f.exists():
                 f.unlink()
         print("[reset] progress cleared")
+
+    if args.prime:
+        sys.exit(prime_session(headless=False))
 
     if args.source == "all":
         sources = VALID_SOURCES

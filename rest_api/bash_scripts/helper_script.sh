@@ -1,5 +1,29 @@
 #!/bin/bash
 
+# Secrets are read from the shell environment so they don't live in the script.
+# Source a local .env (gitignored) before sourcing this file, or export them
+# manually:
+#   set -a; source rest_api/.env; set +a
+#   source rest_api/bash_scripts/helper_script.sh
+#
+# See rest_api/.env.example for the full list.
+
+_eps_warn_default_creds()
+{
+    local _show=0
+    if [[ "${MYSQL_ROOT_PASSWORD:-your_root_password}" == "your_root_password" ]]; then
+        echo "WARNING: MYSQL_ROOT_PASSWORD is the throwaway dev default. NEVER use in production." >&2
+        _show=1
+    fi
+    if [[ "${MYSQL_PASSWORD:-dev_admin}" == "dev_admin" ]]; then
+        echo "WARNING: MYSQL_PASSWORD is the throwaway dev default. NEVER use in production." >&2
+        _show=1
+    fi
+    if [[ $_show -eq 1 ]]; then
+        echo "         Copy rest_api/.env.example -> rest_api/.env and fill in real values." >&2
+    fi
+}
+
 rest_api_build_dev()
 {
     sudo docker network create sqlRest
@@ -9,14 +33,23 @@ rest_api_build_dev()
 
 rest_api_run_dev()
 {
-    sudo docker run --name mysqlserver --network sqlRest -e MYSQL_ROOT_PASSWORD=your_root_password -e MYSQL_DATABASE=test_rest_DB -e MYSQL_USER=dev_admin -e MYSQL_PASSWORD=dev_admin -v mysql_data_test_rest:/var/lib/mysql -p 3306:3306 -d mysql:8.0
-    sudo docker run -it --network sqlRest -p 3004:3004 -v .:/workspace --name cont_llvm_mysql_crow img_llvm_mysql_crow /bin/bash
+    _eps_warn_default_creds
+    sudo docker run --name mysqlserver --network sqlRest \
+        -e MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-your_root_password}" \
+        -e MYSQL_DATABASE="${MYSQL_DATABASE:-test_rest_DB}" \
+        -e MYSQL_USER="${MYSQL_USER:-dev_admin}" \
+        -e MYSQL_PASSWORD="${MYSQL_PASSWORD:-dev_admin}" \
+        -v mysql_data_test_rest:/var/lib/mysql -p 3306:3306 -d mysql:8.0
+    sudo docker run -it --network sqlRest -p 3004:3004 \
+        -e MYSQL_PASSWORD="${MYSQL_PASSWORD:-dev_admin}" \
+        -v .:/workspace --name cont_llvm_mysql_crow img_llvm_mysql_crow /bin/bash
 }
 
 rest_api_backup_db()
 {
+    _eps_warn_default_creds
     sudo docker exec mysqlserver \
-      sh -c 'mysqldump -u root -p"your_root_password" --single-transaction --routines --triggers test_rest_DB' \
+      sh -c "mysqldump -u root -p\"${MYSQL_ROOT_PASSWORD:-your_root_password}\" --single-transaction --routines --triggers ${MYSQL_DATABASE:-test_rest_DB}" \
       > db_backup$(date +%Y%m%d_%H%M%S).sql
 }
 

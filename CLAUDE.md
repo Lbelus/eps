@@ -20,7 +20,7 @@ Three components:
 cd scan_manager
 python -m venv .venv
 source .venv/bin/activate
-pip install pyyaml pdf2image pytesseract pillow beautifulsoup4 rapidfuzz requests playwright
+pip install pyyaml pdf2image pytesseract pillow beautifulsoup4 rapidfuzz requests playwright playwright-stealth
 playwright install chromium
 ```
 
@@ -30,12 +30,20 @@ System dependencies: **Tesseract OCR** (`brew install tesseract`), **Poppler** (
 
 ```bash
 # --- Document collection ---
-python -m src.web.crawler                          # Crawl all sources (DOJ + CourtListener + DocumentCloud)
-python -m src.web.crawler --source doj             # DOJ disclosure tree only
-python -m src.web.crawler --source courtlistener   # CourtListener RECAP archive only
-python -m src.web.crawler --source documentcloud   # DocumentCloud only
-python -m src.web.crawler --headless false          # Show browser window
-python -m src.web.crawler --reset                   # Clear progress, start fresh
+# Convenience wrapper (handles venv activation, subcommands): ./crawl.sh help
+./crawl.sh prime                                    # ONE-TIME: solve any age gate/queue, save session
+./crawl.sh all                                      # Crawl DOJ + CourtListener + DocumentCloud
+./crawl.sh doj                                      # DOJ disclosure tree only
+./crawl.sh cl                                       # CourtListener RECAP archive only
+./crawl.sh dc                                       # DocumentCloud only
+./crawl.sh reset                                    # Clear progress + saved session
+
+# Or call the module directly:
+python -m src.web.crawler --prime
+python -m src.web.crawler
+python -m src.web.crawler --source doj
+python -m src.web.crawler --headless false
+python -m src.web.crawler --reset
 
 # --- Ingest & search ---
 python src/main.py --mode ingest                   # OCR all PDFs → SQLite (parallel, resumable)
@@ -79,11 +87,11 @@ SQLite with FTS5 full-text search:
 
 #### Web Crawler (`src/web/`)
 - **`src/web/crawler.py`** — Multi-source document crawler
-  - **DOJ source**: Walks `justice.gov/epstein/doj-disclosures` tree with Playwright (bypasses Akamai WAF/JS challenge), discovers all sub-sections and document links via BFS
+  - **DOJ source**: Walks `justice.gov/epstein/doj-disclosures` tree with Playwright. Uses a persisted `data/doj_session_state.json` (from `--prime`), `playwright-stealth` fingerprint patches, and an init script that pads `navigator.{webdriver,languages,plugins,platform}`. Warmup retries with back-off and detects challenge pages by title/body markers before crawling.
   - **CourtListener source**: Searches RECAP archive REST API for each subject in `search_subjects.yaml`
   - **DocumentCloud source**: Searches public document API for Epstein/Maxwell-related terms
   - Downloads via Playwright `expect_download` (DOJ, handles age gates) or direct `requests` (CL/DC)
-  - Resumable: tracks progress in `data/crawl_seen.txt` (visited pages) and `data/crawl_pdfs.txt` (downloaded docs)
+  - DOJ visited-section tracking is process-local — every run retraverses the tree so newly-published sections are picked up. Download dedup is persistent via `data/crawl_pdfs.txt`. DOJ session in `data/doj_session_state.json`.
 - **`src/web/queries.py`** — Search query generator (combinatorial product of terms, doc types, people, places, dates, sites)
 
 #### Ingest Pipeline (`src/core/`)
@@ -109,8 +117,8 @@ scan_manager/data/
 ├── json/               # Enriched JSON (legacy pipeline)
 ├── csv/                # Merged CSV (legacy pipeline)
 ├── epstein.db          # SQLite database with FTS5 full-text search
-├── crawl_seen.txt      # Crawler progress: visited pages
-└── crawl_pdfs.txt      # Crawler progress: downloaded document URLs
+├── crawl_pdfs.txt      # Crawler progress: downloaded document URLs (persistent dedup)
+└── doj_session_state.json  # Playwright storage_state for DOJ (saved by --prime)
 ```
 
 ### File naming conventions in data/input/

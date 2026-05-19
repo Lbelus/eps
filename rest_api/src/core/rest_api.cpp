@@ -75,12 +75,12 @@ int thread_safe_api(const mysql_connection_t* conn_id, mysql_thread_safe_func_pt
     return EXIT_SUCCESS;
 }
 
-int thread_safe_cors_api(const mysql_connection_t* conn_id, mysql_thread_safe_cors_func_ptr_t<> func_ptr_arr[], int port, const char* allowed_origins)
+int thread_safe_cors_api(const mysql_connection_t* conn_id, mysql_thread_safe_cors_func_ptr_t<> func_ptr_arr[], int port, const char* allowed_origins, const char* bind_addr)
 {
     crow::App<crow::CORSHandler> app;
     auto& cors = app.get_middleware<crow::CORSHandler>();
     cors.global()
-        .headers("Content-Type")
+        .headers("Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With")
         .methods("GET"_method, "POST"_method, "PUT"_method, "DELETE"_method, "OPTIONS"_method)
         .origin(allowed_origins);
     SimpleConnectionPool pool(conn_id);
@@ -95,6 +95,13 @@ int thread_safe_cors_api(const mysql_connection_t* conn_id, mysql_thread_safe_co
         func_ptr_arr[index](app, pool);
         index += 1;
     }
-    app.port(port).multithreaded().run();
+    if (bind_addr != nullptr && bind_addr[0] != '\0')
+    {
+        app.bindaddr(bind_addr).port(port).multithreaded().run();
+    }
+    else
+    {
+        app.port(port).multithreaded().run();
+    }
     return EXIT_SUCCESS;
 }

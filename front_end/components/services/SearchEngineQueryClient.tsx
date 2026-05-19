@@ -8,17 +8,24 @@ type Status =
 
 const toQueryString = (params: Record<string, string>) => {
   const searchParams = new URLSearchParams();
+
   Object.entries(params).forEach(([key, value]) => {
     if (value.trim() !== "") {
       searchParams.append(key, value.trim());
     }
   });
+
   const query = searchParams.toString();
   return query ? `?${query}` : "";
 };
 
+const DEFAULT_SEARCH_ENGINE_API_URL =
+  process.env.NEXT_PUBLIC_SEARCH_ENGINE_API_URL?.replace(/\/$/, "") ||
+  process.env.NEXT_PUBLIC_REST_API_URL?.replace(/\/$/, "") ||
+  "http://127.0.0.1:3004";
+
 const SearchEngineQueryClient: React.FC = () => {
-  const endpoint = process.env.NEXT_PUBLIC_SEARCH_ENGINE_API_URL ?? "";
+  const [endpoint, setEndpoint] = useState(DEFAULT_SEARCH_ENGINE_API_URL);
   const [query, setQuery] = useState("");
   const [limit, setLimit] = useState("");
   const [offset, setOffset] = useState("");
@@ -45,7 +52,8 @@ const SearchEngineQueryClient: React.FC = () => {
     if (!endpoint.trim()) {
       setStatus({
         type: "error",
-        message: "Missing NEXT_PUBLIC_SEARCH_ENGINE_API_URL in .env.",
+        message:
+          "Missing API endpoint. Set NEXT_PUBLIC_SEARCH_ENGINE_API_URL or NEXT_PUBLIC_REST_API_URL in .env.",
       });
       return;
     }
@@ -69,6 +77,7 @@ const SearchEngineQueryClient: React.FC = () => {
       setResponseCode(response.status);
 
       const safeBody = text.trim() ? text : "(empty response)";
+
       try {
         const parsed = JSON.parse(text);
         setResponseBody(JSON.stringify(parsed, null, 2));
@@ -86,7 +95,9 @@ const SearchEngineQueryClient: React.FC = () => {
 
       setStatus({ type: "success", message: "Request completed successfully." });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown network error";
+      const message =
+        error instanceof Error ? error.message : "Unknown network error";
+
       setStatus({ type: "error", message: `Request failed: ${message}` });
     }
   };
@@ -94,7 +105,9 @@ const SearchEngineQueryClient: React.FC = () => {
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900">
       <header className="mb-6">
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Search engine</h1>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">
+          Search engine
+        </h1>
         <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
           Search court documents.
         </p>
@@ -102,6 +115,17 @@ const SearchEngineQueryClient: React.FC = () => {
 
       <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
         <div className="space-y-4">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 sm:col-span-2">
+            API endpoint
+            <input
+              type="text"
+              value={endpoint}
+              onChange={(event) => setEndpoint(event.target.value)}
+              placeholder={DEFAULT_SEARCH_ENGINE_API_URL}
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-primary focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+            />
+          </label>
+
           <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 sm:col-span-2">
             Search term
             <input
@@ -125,6 +149,7 @@ const SearchEngineQueryClient: React.FC = () => {
                 className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-primary focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
               />
             </label>
+
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
               offset
               <input
@@ -148,12 +173,17 @@ const SearchEngineQueryClient: React.FC = () => {
 
           <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950">
             <p className="text-xs font-medium text-slate-500">cURL preview</p>
-            <code className="mt-1 block overflow-auto text-xs text-slate-700 dark:text-slate-300">{commandPreview}</code>
+            <code className="mt-1 block overflow-auto text-xs text-slate-700 dark:text-slate-300">
+              {commandPreview}
+            </code>
           </div>
         </div>
 
         <aside className="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-950">
-          <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Result</h2>
+          <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+            Result
+          </h2>
+
           <p
             className={`text-sm ${
               status.type === "error"

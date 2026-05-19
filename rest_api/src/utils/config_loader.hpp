@@ -28,6 +28,7 @@ typedef struct MySql_config_s MySql_config_t;
 struct server_config_s
 {
     std::string host;
+    std::string bind_addr;
     std::string allowed_origins;
     bool reconnect;
     unsigned short port;
@@ -45,6 +46,7 @@ typedef struct app_config_s app_config_t;
 enum class string_code
 {
     host,
+    bind_addr,
     port,
     user,
     password,
