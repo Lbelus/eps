@@ -125,6 +125,9 @@ string_code map_string(const std::string& str)
     if (str == "allowed_origins")
         return string_code::allowed_origins;
 
+    if (str == "bind_addr")
+        return string_code::bind_addr;
+
     return string_code::unknown;
 }
 
@@ -157,6 +160,10 @@ void parser(app_config_t& config, const std::string& section, const std::vector<
                 config.server.host = value;
                 break;
 
+            case string_code::bind_addr:
+                config.server.bind_addr = value;
+                break;
+
             case string_code::port:
                 config.server.port = static_cast<unsigned short>(
                     parse_uint("server.port", value)
@@ -166,7 +173,7 @@ void parser(app_config_t& config, const std::string& section, const std::vector<
             case string_code::threads:
                 config.server.threads = parse_uint("server.threads", value);
                 break;
-            
+
             case string_code::allowed_origins:
                 config.server.allowed_origins = value;
                 break;
@@ -236,7 +243,14 @@ app_config_t load_config(const char* filename)
             continue;
         }
         std::size_t indent = count_leading_spaces(line);
-        vec = split_fc(clean_line, ':' );
+        const std::size_t colon = clean_line.find(':');
+        if (colon == std::string::npos)
+        {
+            continue;
+        }
+        vec.clear();
+        vec.push_back(trim(clean_line.substr(0, colon)));
+        vec.push_back(trim(clean_line.substr(colon + 1)));
         if (indent == 0)
         {
             current_section = vec.front();
