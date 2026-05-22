@@ -136,7 +136,7 @@ codex_env_install_codex_devctl_sudoers()
 
 codex_env_create_codex_side_devctl()
 {
-    local wrapper_path="${1:-codex_env/bin/devctl}"
+    local wrapper_path="${1:-bin/devctl}"
     local runner_host="${CODEX_RUNNER_HOST:-host.docker.internal}"
     local runner_user="${CODEX_RUNNER_USER:-codex-runner}"
 
@@ -334,4 +334,15 @@ codex_env_mount_ssh_key()
     sudo docker exec "$CODEX_CONTAINER" chmod 600 "$CODEX_SSH_DIR/known_hosts"
 }
 
+codex_env_build_capability_gated_command_bridge()
+{
+    codex_env_fix_project_dir_in_whitelist
+    codex_env_install_codex_devctl_sudoers
+    codex_env_create_codex_side_devctl
+    codex_env_build_ssh_bridge
+    codex_env_build_ssh_gateway
+    codex_env_force_ssh_gateway
+    codex_env_install_codex_runner_devctl_sudoers
+    codex_env_mount_ssh_key
+}
 
