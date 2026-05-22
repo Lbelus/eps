@@ -65,6 +65,11 @@ front_end_run_dev()
     sudo docker run -it --network sqlRest -p 8084:3000 -v ./:/workspace --name cont_eps_front img_eps_front
 }
 
+front_end_start_dev()
+{
+    sudo docker start -ai cont_eps_front 
+}
+
 rest_api_start_dev()
 {
     sudo docker start mysqlserver
