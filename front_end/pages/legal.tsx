@@ -7,26 +7,34 @@ const Legal = () => {
   return (
     <>
       <Head>
-        <title>S|C - Mentions légales</title>
+        <title>EPS - Legal notice</title>
         <meta
           name="description"
-          content="Mentions légales de S|C - Support Centre."
+          content="Legal notice for Epstein Paper System."
         />
         <link rel="icon" href="/favicon.ico" />
       </Head>
-      <SectionTitle
-        pretitle="Légal"
-        title="Mentions légales" align="center">
-            <p>S|C (Support Centre) est une plateforme interne destinée à relier l'expérience utilisateur et les services backend.</p>
-            <p>Les contenus présentés ont pour objectif de faciliter la prise en charge et le suivi des demandes.</p>
-            <p>Nous nous efforçons de maintenir les informations à jour, sans garantir l'absence d'erreurs ou d'omissions.</p>
-            <p>L'utilisation des informations et services disponibles sur ce site se fait sous la responsabilité de l'utilisateur.</p>
-            <p>Ces mentions peuvent être modifiées pour refléter l'évolution des services proposés.</p>
+      <SectionTitle pretitle="Legal" title="Legal notice" align="center">
+        <p>
+          Epstein Paper System provides tools for indexing, searching, and viewing public court documents and public government releases.
+        </p>
+        <p>
+          EPS is an independent research project and is not affiliated with any court, government agency, law enforcement body, party, witness, or media organization.
+        </p>
+        <p>
+          The project may rely on OCR, automated parsing, and metadata extraction. Those processes can introduce errors, omissions, or formatting issues.
+        </p>
+        <p>
+          Content made available through EPS should be treated as a research aid, not as an official record. Original source documents remain the authority for citation or legal use.
+        </p>
+        <p>
+          References to people, organizations, events, or allegations reflect the contents of public records and should not be read as independent findings by EPS.
+        </p>
       </SectionTitle>
       <Footer />
       <PopupWidget />
     </>
   );
-}
+};
 
 export default Legal;

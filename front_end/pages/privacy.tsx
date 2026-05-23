@@ -7,26 +7,34 @@ const Privacy = () => {
   return (
     <>
       <Head>
-        <title>S|C - Politique de confidentialité</title>
+        <title>EPS - Privacy policy</title>
         <meta
           name="description"
-          content="Politique de confidentialité de S|C - Support Centre."
+          content="Privacy policy for Epstein Paper System."
         />
         <link rel="icon" href="/favicon.ico" />
       </Head>
-      <SectionTitle
-        pretitle="Légal"
-        title="Politique de confidentialité" align="center">
-            <p>S|C respecte la confidentialité des utilisateurs et des équipes qui utilisent la plateforme.</p>
-            <p>Les informations saisies dans S|C sont utilisées pour traiter les demandes, assurer leur suivi et améliorer l'expérience de support.</p>
-            <p>Nous ne collectons que les données nécessaires au fonctionnement du service et à la coordination des activités commerciales et administratives.</p>
-            <p>Les données sont conservées le temps requis pour répondre aux besoins opérationnels et respecter les obligations légales.</p>
-            <p>Aucune donnée n'est vendue à des tiers ; les accès sont limités aux personnes autorisées.</p>
+      <SectionTitle pretitle="Legal" title="Privacy policy" align="center">
+        <p>
+          EPS is designed as a document research tool. The searchable corpus is built from public records and public releases.
+        </p>
+        <p>
+          When you use the site, standard technical information such as request metadata, browser information, and basic usage signals may be processed to operate, secure, and improve the service.
+        </p>
+        <p>
+          Search terms and interactions may be handled by the application and REST API to return results, diagnose issues, and monitor reliability.
+        </p>
+        <p>
+          EPS does not sell user data. Access to operational data should be limited to maintainers or authorized service providers who need it to run the project.
+        </p>
+        <p>
+          Public documents may contain names, allegations, and sensitive details already present in source records. Users should handle that material responsibly and verify it against the original record.
+        </p>
       </SectionTitle>
       <Footer />
       <PopupWidget />
     </>
   );
-}
+};
 
 export default Privacy;

@@ -6,8 +6,6 @@ import Container from "./container";
 export default function Footer() {
   const navigation = [
     { name: "Home", href: "/" },
-    { name: "Services", href: "/#services" },
-    { name: "User area", href: "/settings" },
   ];
   const legal = [
     { name: "Terms", href: "/terms" },
