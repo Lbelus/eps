@@ -7,10 +7,10 @@ export default function SearchEngineServicePage() {
   return (
     <>
       <Head>
-        <title>Search engine · REST requests</title>
+        <title>Document search · EPS</title>
         <meta
           name="description"
-          content="Query the Search Engine courtdocuments routes with filters, pagination, and response preview."
+          content="Search EPS court documents, inspect matching snippets, and read OCR text by page."
         />
       </Head>
 
