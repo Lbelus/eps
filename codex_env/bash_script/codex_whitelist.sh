@@ -17,6 +17,8 @@ MYSQL_USER="${MYSQL_USER:-dev_admin}"
 MYSQL_PASSWORD="${MYSQL_PASSWORD:-dev_admin}"
 API_PORT="${API_PORT:-3004}"
 FRONT_PORT="${FRONT_PORT:-3000}"
+API_HOST_PORT="${API_HOST_PORT:-$API_PORT}"
+FRONT_HOST_PORT="${FRONT_HOST_PORT:-8084}"
 
 cmd="${1:-}"
 shift || true
@@ -50,6 +52,21 @@ resolve_container()
       echo "Denied container: ${1:-}" >&2
       echo "Allowed containers: rest, front, mysql" >&2
       exit 2
+      ;;
+  esac
+}
+
+resolve_http_target()
+{
+  case "${1:-}" in
+    rest|api|"$REST_CONTAINER"|"$REST_CONTAINER:$API_PORT")
+      echo "127.0.0.1:$API_HOST_PORT"
+      ;;
+    front|frontend|"$FRONT_CONTAINER"|"$FRONT_CONTAINER:$FRONT_PORT")
+      echo "127.0.0.1:$FRONT_HOST_PORT"
+      ;;
+    *)
+      echo "${1:-}"
       ;;
   esac
 }
@@ -233,31 +250,31 @@ SQL
     ;;
 
   test-docs-read-all)
-    ip_port="${1:-127.0.0.1:$API_PORT}"
+    ip_port="$(resolve_http_target "${1:-127.0.0.1:$API_HOST_PORT}")"
     curl -X GET "http://$ip_port/courtdocuments"
     ;;
 
   test-docs-read-page)
-    ip_port="${1:-127.0.0.1:$API_PORT}"
+    ip_port="$(resolve_http_target "${1:-127.0.0.1:$API_HOST_PORT}")"
     limit="${2:-20}"
     offset="${3:-0}"
     curl -X GET "http://$ip_port/courtdocuments?limit=$limit&offset=$offset"
     ;;
 
   test-doc-by-id)
-    ip_port="${1:-127.0.0.1:$API_PORT}"
+    ip_port="$(resolve_http_target "${1:-127.0.0.1:$API_HOST_PORT}")"
     id="${2:?document id required}"
     curl -X GET "http://$ip_port/courtdocuments/$id"
     ;;
 
   test-doc-pages)
-    ip_port="${1:-127.0.0.1:$API_PORT}"
+    ip_port="$(resolve_http_target "${1:-127.0.0.1:$API_HOST_PORT}")"
     document_id="${2:?document id required}"
     curl -X GET "http://$ip_port/courtdocuments/$document_id/pages"
     ;;
 
   test-doc-search)
-    ip_port="${1:-127.0.0.1:$API_PORT}"
+    ip_port="$(resolve_http_target "${1:-127.0.0.1:$API_HOST_PORT}")"
     query="${2:?query required}"
     limit="${3:-20}"
     offset="${4:-0}"
@@ -268,7 +285,7 @@ SQL
     ;;
 
   front-smoke)
-    ip_port="${1:-$FRONT_CONTAINER:$FRONT_PORT}"
+    ip_port="$(resolve_http_target "${1:-$FRONT_CONTAINER:$FRONT_PORT}")"
     curl -I "http://$ip_port"
     ;;
 
