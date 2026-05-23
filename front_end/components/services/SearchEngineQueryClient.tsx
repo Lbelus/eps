@@ -35,10 +35,7 @@ type ResultItem = CourtDocument & {
 type ResultMode = "all" | "search";
 type DetailTab = "pages" | "fullText" | "metadata";
 
-const DEFAULT_SEARCH_ENGINE_API_URL =
-  process.env.NEXT_PUBLIC_SEARCH_ENGINE_API_URL?.replace(/\/$/, "") ||
-  process.env.NEXT_PUBLIC_REST_API_URL?.replace(/\/$/, "") ||
-  "http://127.0.0.1:3004";
+const DEFAULT_SEARCH_ENGINE_API_URL = process.env.NEXT_PUBLIC_REST_API_URL?.replace(/[/]$/, "") || "";
 
 const SOURCE_LABELS: Record<string, string> = {
   cl: "CourtListener",
@@ -151,7 +148,6 @@ const renderHighlightedText = (text: string, terms: string[]) => {
 };
 
 const SearchEngineQueryClient: React.FC = () => {
-  const [endpoint, setEndpoint] = useState(DEFAULT_SEARCH_ENGINE_API_URL);
   const [query, setQuery] = useState("");
   const [limit, setLimit] = useState("20");
   const [offset, setOffset] = useState("0");
@@ -170,13 +166,13 @@ const SearchEngineQueryClient: React.FC = () => {
     () => pages.find((page) => page.page_number === activePageNumber) || pages[0],
     [activePageNumber, pages]
   );
-  const cleanedEndpoint = useMemo(() => normalizeEndpoint(endpoint), [endpoint]);
+  const cleanedEndpoint = useMemo(() => normalizeEndpoint(DEFAULT_SEARCH_ENGINE_API_URL), []);
   const resultLimit = useMemo(() => parsePositiveInt(limit, 20), [limit]);
   const resultOffset = useMemo(() => parseNonNegativeInt(offset, 0), [offset]);
 
   const requestJson = async <T,>(path: string): Promise<T> => {
     if (!cleanedEndpoint) {
-      throw new Error("Missing API endpoint.");
+      throw new Error("Missing NEXT_PUBLIC_REST_API_URL.");
     }
 
     const response = await fetch(`${cleanedEndpoint}${path}`);
@@ -604,19 +600,6 @@ const SearchEngineQueryClient: React.FC = () => {
           )}
         </article>
       </div>
-
-      <details className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-        <summary className="cursor-pointer font-semibold text-slate-900 dark:text-white">Connection</summary>
-        <label className="mt-4 block font-medium">
-          API endpoint
-          <input
-            type="text"
-            value={endpoint}
-            onChange={(event) => setEndpoint(event.target.value)}
-            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-          />
-        </label>
-      </details>
     </section>
   );
 };
