@@ -1,0 +1,17 @@
+{
+  "name": "EPS - Epstein Paper System",
+  "short_name": "EPS",
+  "description": "EPS is a court document search engine and viewer focused on the Jeffrey Epstein court case.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/eps-favicon.svg",
+      "sizes": "64x64",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
