@@ -35,6 +35,10 @@ type ResultItem = CourtDocument & {
 type ResultMode = "all" | "search";
 type DetailTab = "pages" | "fullText" | "metadata";
 
+type RuntimeConfig = {
+  restApiUrl?: string;
+};
+
 const DEFAULT_SEARCH_ENGINE_API_URL = process.env.NEXT_PUBLIC_REST_API_URL?.replace(/[/]$/, "") || "";
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -158,15 +162,20 @@ const SearchEngineQueryClient: React.FC = () => {
   const [activePageNumber, setActivePageNumber] = useState(1);
   const [pageJump, setPageJump] = useState("1");
   const [activeTab, setActiveTab] = useState<DetailTab>("pages");
-  const [status, setStatus] = useState<Status>({ type: "idle", message: "Loading recent documents." });
+  const [status, setStatus] = useState<Status>({
+    type: "idle",
+    message: DEFAULT_SEARCH_ENGINE_API_URL ? "Loading recent documents." : "Loading API configuration.",
+  });
   const [detailStatus, setDetailStatus] = useState<Status>({ type: "idle", message: "Select a document to read." });
+  const [apiBaseUrl, setApiBaseUrl] = useState(DEFAULT_SEARCH_ENGINE_API_URL);
+  const [configLoaded, setConfigLoaded] = useState(Boolean(DEFAULT_SEARCH_ENGINE_API_URL));
 
   const queryTerms = useMemo(() => getQueryTerms(query), [query]);
   const activePage = useMemo(
     () => pages.find((page) => page.page_number === activePageNumber) || pages[0],
     [activePageNumber, pages]
   );
-  const cleanedEndpoint = useMemo(() => normalizeEndpoint(DEFAULT_SEARCH_ENGINE_API_URL), []);
+  const cleanedEndpoint = useMemo(() => normalizeEndpoint(apiBaseUrl), [apiBaseUrl]);
   const resultLimit = useMemo(() => parsePositiveInt(limit, 20), [limit]);
   const resultOffset = useMemo(() => parseNonNegativeInt(offset, 0), [offset]);
 
@@ -269,10 +278,50 @@ const SearchEngineQueryClient: React.FC = () => {
   };
 
   useEffect(() => {
-    void loadResults("all", 0);
-    // Run once on mount with the configured default endpoint.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (DEFAULT_SEARCH_ENGINE_API_URL) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadRuntimeConfig = async () => {
+      setStatus({ type: "loading", message: "Loading API configuration." });
+
+      try {
+        const response = await fetch("/api/runtime-config", { cache: "no-store" });
+        const data = (await response.json()) as RuntimeConfig;
+        const nextApiBaseUrl = normalizeEndpoint(data.restApiUrl || "");
+
+        if (!response.ok || !nextApiBaseUrl) {
+          throw new Error("Missing NEXT_PUBLIC_REST_API_URL.");
+        }
+
+        if (!cancelled) {
+          setApiBaseUrl(nextApiBaseUrl);
+          setConfigLoaded(true);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unable to load API configuration.";
+        if (!cancelled) {
+          setStatus({ type: "error", message });
+        }
+      }
+    };
+
+    void loadRuntimeConfig();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  useEffect(() => {
+    if (configLoaded) {
+      void loadResults("all", 0);
+    }
+    // Run when the API endpoint configuration is available.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configLoaded]);
 
   return (
     <section className="space-y-5">

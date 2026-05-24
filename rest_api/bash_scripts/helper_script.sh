@@ -315,6 +315,28 @@ rest_api_test_documents_smoke()
         --data-urlencode "q=$query" | jq
 }
 
+
+
+front_end_merger_to_prod()
+{
+
+    git fetch origin
+    git switch prod_front
+    git restore --source=origin/main --staged --worktree -- front_end/
+}
+
+
+
+rest_api_merge_main_to_prod()
+{
+    git fetch origin
+    git switch prod_restAPI
+    git restore --source=origin/main --staged --worktree -- rest_api/
+
+    rm -r rest_api/bash_scripts/generate_mysqlpp_table.sh rest_api/db/schema.sql rest_api/mock_rest_client.py rest_api/src/core/mysql_helpers.cpp rest_api/src/core/mysql_helpers.hpp rest_api/src/core/mysql_helpers.cpp rest_api/src/db_repository/example_repository.hpp rest_api/src/db_repository/mysql_string_repository.cpp rest_api/src/db_repository/mysql_string_repository.hpp rest_api/src/db_repository/redis_repository.cpp rest_api/src/db_repository/mysql_string_repository.tpp  rest_api/src/utils/mock_querry_builder.cpp /rest_api/src/core/mysql_helpers.hpp
+    sudo rm -r rest_api/build/*
+}
+
 re()
 {
     clear
