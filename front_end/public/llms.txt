@@ -1,0 +1,103 @@
+# EPS - Epstein Paper System
+
+EPS is a court document search engine and viewer for public court documents and public government releases related to the Jeffrey Epstein court case.
+
+## REST API access
+
+The frontend reads the REST API base URL from `NEXT_PUBLIC_REST_API_URL`. In local Docker development, the REST API container is usually reachable from other containers as:
+
+- `http://cont_llvm_mysql_crow:3004`
+
+From a host browser or host-side tool, use the host-published URL configured for the deployment, commonly:
+
+- `http://localhost:3004`
+
+When interacting through the frontend, `/api/runtime-config` returns the configured REST API base URL for the running Next.js process.
+
+## Available REST endpoints
+
+All endpoints return JSON on success unless noted otherwise.
+
+### List court documents
+
+`GET /courtdocuments?limit=<number>&offset=<number>`
+
+Default behavior: `limit=100`, `offset=0`.
+
+Returns an array of documents. Each document includes:
+
+- `document_id`: numeric document identifier
+- `filename`: source filename
+- `source`: short source code, such as `cl`, `dc`, or `doj`
+- `page_count`: number of pages in the document
+- `full_text`: OCR or extracted text when available
+- `created_at`: creation timestamp
+
+Example:
+
+```bash
+curl "${NEXT_PUBLIC_REST_API_URL}/courtdocuments?limit=10&offset=0"
+```
+
+### Get one court document
+
+`GET /courtdocuments/<document_id>`
+
+Returns one document object. A missing document returns HTTP 404 with a plain-text error body.
+
+Example:
+
+```bash
+curl "${NEXT_PUBLIC_REST_API_URL}/courtdocuments/1"
+```
+
+### Get document pages
+
+`GET /courtdocuments/<document_id>/pages`
+
+Returns an array of page objects. Each page includes:
+
+- `page_id`: numeric page identifier
+- `document_id`: owning document identifier
+- `page_number`: page number within the document
+- `page_text`: OCR or extracted page text
+
+Example:
+
+```bash
+curl "${NEXT_PUBLIC_REST_API_URL}/courtdocuments/1/pages"
+```
+
+### Search court documents
+
+`GET /courtdocuments/search?q=<query>&limit=<number>&offset=<number>`
+
+Required parameter: `q`.
+Default behavior: `limit=20`, `offset=0`.
+
+Returns an array of search hits. Each hit includes:
+
+- `document_id`
+- `filename`
+- `source`
+- `page_count`
+- `score`: relevance score
+- `created_at`
+- `snippet`: matching text fragment; matches are wrapped with `>>>` and `<<<`
+
+Example:
+
+```bash
+curl -G "${NEXT_PUBLIC_REST_API_URL}/courtdocuments/search" \
+  --data-urlencode "q=flight logs" \
+  --data-urlencode "limit=10" \
+  --data-urlencode "offset=0"
+```
+
+## Agent usage guidance
+
+- Prefer `GET /courtdocuments/search` for discovery, then fetch the selected document with `GET /courtdocuments/<id>` and pages with `GET /courtdocuments/<id>/pages`.
+- Use small `limit` values first, such as 10 or 20, and paginate with `offset`.
+- URL-encode all search queries.
+- Treat OCR text and snippets as research aids. Verify citations against original source documents when legal accuracy matters.
+- Do not assume references to people, organizations, or allegations are findings by EPS. They reflect public source material and automated extraction.
