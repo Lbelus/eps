@@ -4,14 +4,7 @@ EPS is a court document search engine and viewer for public court documents and 
 
 ## REST API access
 
-The frontend reads the REST API base URL from `NEXT_PUBLIC_REST_API_URL`. In local Docker development, the REST API container is usually reachable from other containers as:
-
-- `http://cont_llvm_mysql_crow:3004`
-
-From a host browser or host-side tool, use the host-published URL configured for the deployment, commonly:
-
-- `http://localhost:3004`
-
+The frontend reads the REST API base URL from `NEXT_PUBLIC_REST_API_URL`. 
 When interacting through the frontend, `/api/runtime-config` returns the configured REST API base URL for the running Next.js process.
 
 ## Available REST endpoints
