@@ -1,192 +1,192 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# EPS Frontend
 
-## Getting Started
+The `front_end` package is the Next.js web interface for EPS, the Epstein Paper System. It provides the public landing pages, legal pages, and a court document search/viewer backed by the C++ REST API in `rest_api/`.
 
-First, run the development server:
+## What This App Contains
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- Landing page for EPS.
+- Court document visualizer at `/services/search-engine`.
+- Placeholder Matrix chat page at `/services/matrix-chat`.
+- Terms, privacy policy, and legal notice pages.
+- Runtime configuration endpoint at `/api/runtime-config`.
+- Public crawler/agent files: `/robots.txt`, `/sitemap.xml`, `/site.webmanifest`, and `/llms.txt`.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Tech Stack
 
-You can start editing the page by modifying `pages/index.tsx`. The page auto-updates as you edit the file.
+- Next.js Pages Router
+- React
+- TypeScript
+- Tailwind CSS
+- `next-themes` for light/dark theme support
+- `next-sitemap` for sitemap and robots generation
 
-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
+## Requirements
 
-## Learn More
+- Node.js 18 or newer
+- npm
+- A reachable EPS REST API instance for document search
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
-
-
-
-## Create manage your Docker container
-
-Generate the image;
-```bash
-sudo docker build -t img_sc .
-```
-Create the container
-```bash
-sudo docker run -it -v /PathToMyProject/:/workspace --name cont_surface img_sc
-```
-The container is created but currently stopped
-```bash
-sudo docker start -ai cont_sc
-```
-The container is created but currently running
-```bash
-sudo docker exec -it cont_sc /bin/bash
-```
+In the Docker development setup used by this project, the REST API container is usually named `cont_llvm_mysql_crow` and listens on port `3004`.
 
 ## Environment Variables
 
-To work that project will require api keys and various variable. 
-Create a .env.local file with those variables :
+Copy `.env.example` to `.env.local` for local development:
+
+```bash
+cp .env.example .env.local
+```
+
+Required for document search:
+
 ```txt
-GOOGLE_ID=
-GOOGLE_SECRET=
-NEXTAUTH_URL=
-SECRET=
-FIREBASE_API_KEY=
-FIREBASE_AUTH_DOMAIN=
-FIREBASE_PROJECT_ID=
-FIREBASE_STORAGE_BUCKET=
-FIREBASE_MESSAGING_SENDER_ID=
-FIREBASE_APP_ID=
-FIREBASE_MEASUREMENT_ID=
-GOOGLE_APPLICATION_CREDENTIALS=./service-account.json
-AUTH_FIREBASE_PRIVATE_KEY=
-AUTH_FIREBASE_CLIENT_EMAIL=
-AUTH_FIREBASE_PROJECT_ID=
+NEXT_PUBLIC_REST_API_URL=http://localhost:3004
 ```
 
-## AUTH
+Use the URL that the browser can reach. Examples:
 
-Obtain given https address from tunneling and add it to .env file and your google console developer authorized url
-```
-NEXTAUTH_URL=
-```
+```txt
+# Browser running on the host, REST API published on host port 3004
+NEXT_PUBLIC_REST_API_URL=http://localhost:3004
 
-How to Generate a Strong Secret:
-You can generate a strong secret using Node.js's crypto module. Run the following command in your terminal:
-bash
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
+# Frontend and REST API communicating inside Docker network
+NEXT_PUBLIC_REST_API_URL=http://cont_llvm_mysql_crow:3004
 
-## FIREBASE
-go to firebase web console and add your google project.
-
-https://console.firebase.google.com;
-
-
-follow these steps : https://firebase.google.com/codelabs/firebase-nextjs#2
-
-- Add a web app to your Firebase project.
-- Navigate to your Project overview in your Firebase project, and then click ``</>`` Web.
-- In the App nickname text box, enter a memorable app nickname, such as My Next.js app.
-- Click Register app > Next > Next > Continue to console.
-- Store firebase config in .env.local.
-
-### Set up Authentication
-In the Firebase console, navigate to Authentication.
-- Click Get started.
-- In the Additional providers column, click Google > Enable.
-- In the Public-facing name for project text box, enter a memorable name, such as My Next.js app.
-- From the Support email for project drop-down, select your email address.
-- Click Save.
-- update .env variables to match firebaseconfig variables with the client id and the client secret coming from the google cloud console.
-
-### Set up Cloud Firestore
-In the Firebase console, navigate to cloud Firestore.
-- Click Create database > Start in test mode > Next.
-- Use the default location or select a location of your choice.
-- Later in the project, you'll add Security Rules to secure your data. Do not distribute or expose an app publicly without adding Security Rules for your database.
-- For a real app, you want to choose a location that's close to your users. Note that this location cannot be changed later, and it will also automatically be the location of your default Cloud Storage bucket (next step).
-- Click Done.
-
-### Set up Cloud Storage for Firebase
-In the Firebase console, navigate to Storage.
-- Click Get started > Start in test mode > Next.
-- Later in this project, you'll add Security Rules to secure your data. Do not distribute or expose an app publicly without adding Security Rules for your Storage bucket.
-- The location of your bucket should already be selected (due to setting up Firestore in the previous step).
-- Click Done.
-
-### Service account
-
-- Go to project settings navigate to Service Accounts
-- Click on generate new private Key
-- Download the service-account.json file and save it in root under the name service-account.json
-
-
-### server identification
-Google cloud console does not recognize localhost as a valid https address.
-To address ``:)`` that situation, you will use a tunneling service to obtain a valid https address. 
-
-For google cloud services to work you will need to add the web client address in the credentials. 
-
-- Go to Google Cloud Console, under credentials
-- Select +create credentials then OAuth client ID. 
-- select the type of application, give a name to the credentials and a valid https address
-- Authorized redirect URIs add the https://myValidAddress/api/auth/callback/google with the /api/auth/callback/google extension.
-- Add the newly create credentials to the .env.local file
-
-
-## Tunneling services
-
-They are various tunneling services we can rely on : 
-
-### Ngrok:
-
-- Install ngrok
-```bash
-curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc \
-	| sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null \
-	&& echo "deb https://ngrok-agent.s3.amazonaws.com buster main" \
-	| sudo tee /etc/apt/sources.list.d/ngrok.list \
-	&& sudo apt update \
-	&& sudo apt install ngrok
-```
-- Go to website : ``https://ngrok.com``
-- Log in
-- Get token and add it to the config
-- run ngrok 
-```bash
-ngrok http 3000
+# Production
+NEXT_PUBLIC_REST_API_URL=https://api.eps.example.com
 ```
 
-### Serveo:
+Optional public site URL, used for canonical URLs, Open Graph URLs, sitemap, and robots output:
+
+```txt
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+```
+
+## Runtime REST API Configuration
+
+The search page uses `NEXT_PUBLIC_REST_API_URL`, but client-side Next.js env values are normally baked into the browser bundle at build time. To support container runtime configuration, the frontend also exposes:
+
+```txt
+GET /api/runtime-config
+```
+
+That endpoint returns the REST API URL from the running Next.js process. The search visualizer uses it when the bundled env value is empty.
+
+## REST API Used By The Search Page
+
+The document visualizer calls these endpoints:
+
+```txt
+GET /courtdocuments?limit=&offset=
+GET /courtdocuments/<id>
+GET /courtdocuments/<id>/pages
+GET /courtdocuments/search?q=...&limit=&offset=
+```
+
+The public `/llms.txt` file documents the same API for LLMs and crawler-like agents.
+
+## Development
+
+Install dependencies:
 
 ```bash
-ssh -R mycustomsite:80:localhost:3000 serveo.net
+npm install
 ```
 
-### local tunnel
+Start the dev server:
 
-- Go to website : ``https://localtunnel.github.io/www/``
-- Install local tunnel
 ```bash
-npm install -g localtunnel
+npm run dev
 ```
-- Run lt
+
+Open:
+
+```txt
+http://localhost:3000
+```
+
+If the search page shows `Missing NEXT_PUBLIC_REST_API_URL`, confirm `.env.local` exists and restart the dev server. Next.js does not always pick up env changes without a restart.
+
+## Scripts
+
 ```bash
-lt --port 3000
+npm run dev       # Start the local Next.js dev server
+npm run build     # Build the production app and run next-sitemap postbuild
+npm run start     # Start the production server after a build
+npm run lint      # Run Next lint, if lint config is initialized
+npm run test      # Run Jest
 ```
 
-## Deploy on Vercel
+Current caveats:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `npm run test` may report no tests if no Jest tests have been added.
+- `npm run lint` may prompt for ESLint setup unless an ESLint config has been created.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
+## Docker Development
+
+The frontend Dockerfile provides a Node-capable Ubuntu container with `/workspace` as the working directory. A typical manual flow is:
+
+```bash
+docker build -t eps-front ./front_end
+docker run -it --name cont_eps_front -p 3000:3000 -v /path/to/repo:/workspace eps-front
+```
+
+Inside the container:
+
+```bash
+cd /workspace/front_end
+npm install
+npm run dev
+```
+
+In the project helper tooling, the frontend container is commonly named `cont_eps_front`.
+
+## Public Metadata And Agent Files
+
+- `_app.tsx` defines default title, description, keywords, Open Graph, Twitter card, viewport, and canonical metadata.
+- `_document.tsx` defines document-level shell metadata, app name, theme color, favicon, manifest, and color scheme.
+- `public/site.webmanifest` describes the EPS web app.
+- `public/robots.txt` is generated by `next-sitemap` during `npm run build`.
+- `public/llms.txt` gives LLMs concise instructions for using the REST API.
+
+Set `NEXT_PUBLIC_SITE_URL` before production builds so canonical URLs, sitemap URLs, and robots output do not use `localhost`.
+
+## Project Structure
+
+```txt
+front_end/
+  components/
+    landingPage/       Shared landing page UI
+    services/          Service-specific client components
+    session/           Session/auth-related UI hooks
+  pages/
+    api/               Next API routes
+    services/          Search and future service pages
+    _app.tsx           Global app wrapper and default metadata
+    _document.tsx      Document shell
+  public/              Static assets, sitemap, robots, llms.txt
+  styles/              Global Tailwind CSS
+```
+
+## Search Page Behavior
+
+`/services/search-engine` loads recent documents on startup, then lets the user:
+
+- Search documents by query.
+- Browse paginated results with `limit` and `offset`.
+- Inspect snippets and relevance scores.
+- Open a document.
+- Read page-level OCR text.
+- Read full document text.
+- Inspect document metadata.
+
+Snippets from the API mark highlighted matches with `>>>` and `<<<`; the UI renders those markers as highlighted text.
+
+## Production Checklist
+
+Before deploying:
+
+- Set `NEXT_PUBLIC_REST_API_URL` to the public REST API origin.
+- Set `NEXT_PUBLIC_SITE_URL` to the public frontend origin.
+- Run `npm run build` so sitemap and robots files are regenerated.
+- Confirm `/llms.txt`, `/robots.txt`, and `/sitemap.xml` are reachable.
+- Confirm the REST API allows browser requests from the frontend origin.

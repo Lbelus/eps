@@ -18,7 +18,7 @@ codex_env_build_img()
         .
 }
 
-codex_env_start()
+codex_env_run()
 {
     mkdir -p "$CODEX_HOME_DIR"
 
@@ -33,6 +33,12 @@ codex_env_start()
         "$CODEX_IMAGE" \
         bash
 }
+
+codex_env_start()
+{
+ sudo docker start -ai "$CODEX_CONTAINER"
+}
+
 
 codex_env_shell()
 {
@@ -56,7 +62,7 @@ codex_env_reset()
 
 codex_env_login()
 {
-    codex_env_start
+    codex_env_run
 }
 
 codex_env_fix_project_dir_in_whitelist()
