@@ -1,5 +1,5 @@
-#ifndef MYSQL_CONN_POOL
-#define MYSQL_CONN_POOL
+#ifndef MYSQL_CONN_POOL_HPP
+#define MYSQL_CONN_POOL_HPP
 
 #include <mysql++/mysql++.h>
 #include <thread>
@@ -7,7 +7,6 @@
 #include <mutex>
 #include <queue>
 #include <vector>
-// #include <mysql_helpers.hpp>
 #include <crow/middlewares/cors.h>
 #include <crow.h>
 

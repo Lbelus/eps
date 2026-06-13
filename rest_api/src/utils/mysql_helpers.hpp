@@ -1,5 +1,5 @@
-#ifndef __JSON_UTILS_HEADER__
-#define __JSON_UTILS_HEADER__
+#ifndef JSON_UTILS_HEADER_HPP
+#define JSON_UTILS_HEADER_HPP
 
 #include <crow.h>
 #include <string.h>

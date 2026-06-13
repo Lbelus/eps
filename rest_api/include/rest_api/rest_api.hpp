@@ -2,18 +2,12 @@
 #define __REST_API_
 
 #include <mysql++/mysql++.h>
+#include <rest_api/mysql_conn_pool.hpp>
 #include <sw/redis++/redis++.h>
+
 #include <iostream>
 #include <string>
-#include <mysql_conn_pool.hpp>
-#include <config_loader.hpp>
-// call repos here
-
-#include <mysql_string_repository.hpp>
-#define MYSQLPP_SSQLS_NO_STATICS
-#include <example_repository.hpp>
-#include <court_doc_repository.hpp>
-#undef MYSQLPP_SSQLS_NO_STATICS
+#include <rest_api/config_loader.hpp>
 
 
 const mysql_connection_t* allocate_mysql_credentials(const char* db, const char* server=0, const char* user=0, const char* password=0, unsigned int port=0);
