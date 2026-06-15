@@ -1,4 +1,4 @@
-#include <mysql_conn_pool.hpp>
+#include <rest_api/mysql_conn_pool.hpp>
 
 unsigned int GetThreadCount(unsigned int divBy)
 {

@@ -98,6 +98,7 @@ codex_env_codex_devctl_sudoers_line()
     printf ', %s' "${codex_devctl} build"
     printf ', %s' "${codex_devctl} build-full"
     printf ', %s' "${codex_devctl} build-beta"
+    printf ', %s' "${codex_devctl} build-package"
     printf ', %s' "${codex_devctl} unit-tests"
     printf ', %s' "${codex_devctl} run-api"
     printf ', %s' "${codex_devctl} front-lint"
@@ -167,12 +168,12 @@ if [[ -r "\$known_hosts" ]]; then
 fi
 
 case "\$cmd" in
-  build-dev|run-dev|start-dev|stop-dev|rm-dev|ps|logs-rest|logs-front|logs-mysql|ip|build|build-full|build-beta|unit-tests|run-api|front-lint|front-typecheck|front-build|front-test|init-docs-db|drop-docs-db|migration-counts|test-docs-read-all|test-docs-read-page|test-doc-by-id|test-doc-pages|test-doc-search|front-smoke)
+  build-dev|run-dev|start-dev|stop-dev|rm-dev|ps|logs-rest|logs-front|logs-mysql|ip|build|build-full|build-beta|build-package|unit-tests|run-api|front-lint|front-typecheck|front-build|front-test|init-docs-db|drop-docs-db|migration-counts|test-docs-read-all|test-docs-read-page|test-doc-by-id|test-doc-pages|test-doc-search|front-smoke)
     ssh "\${ssh_args[@]}" ${runner_user}@${runner_host} "\$cmd" "\$@"
     ;;
   *)
     echo "Denied local command: \$cmd" >&2
-    echo "Allowed: build-dev run-dev start-dev stop-dev rm-dev ps logs-rest logs-front logs-mysql ip build build-full build-beta unit-tests run-api front-lint front-typecheck front-build front-test init-docs-db drop-docs-db migration-counts test-docs-read-all test-docs-read-page test-doc-by-id test-doc-pages test-doc-search front-smoke" >&2
+    echo "Allowed: build-dev run-dev start-dev stop-dev rm-dev ps logs-rest logs-front logs-mysql ip build build-full build-beta build-package unit-tests run-api front-lint front-typecheck front-build front-test init-docs-db drop-docs-db migration-counts test-docs-read-all test-docs-read-page test-doc-by-id test-doc-pages test-doc-search front-smoke" >&2
     exit 2
     ;;
 esac
@@ -231,7 +232,7 @@ if [[ ${#argv[@]} -gt 1 ]]; then
 fi
 
 case "$cmd" in
-  build-dev|run-dev|start-dev|stop-dev|rm-dev|ps|logs-rest|logs-front|logs-mysql|ip|build|build-full|build-beta|unit-tests|run-api|front-lint|front-typecheck|front-build|front-test|init-docs-db|drop-docs-db|migration-counts|test-docs-read-all|test-docs-read-page|test-doc-by-id|test-doc-pages|test-doc-search|front-smoke)
+  build-dev|run-dev|start-dev|stop-dev|rm-dev|ps|logs-rest|logs-front|logs-mysql|ip|build|build-full|build-beta|build-package|unit-tests|run-api|front-lint|front-typecheck|front-build|front-test|init-docs-db|drop-docs-db|migration-counts|test-docs-read-all|test-docs-read-page|test-doc-by-id|test-doc-pages|test-doc-search|front-smoke)
     sudo /usr/local/bin/codex-devctl "$cmd" "${args[@]}"
     ;;
 

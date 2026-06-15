@@ -2,7 +2,7 @@
 #include <string.h>
 #include <crow.h>
 #include <crow/middlewares/cors.h>
-#include <mysql_conn_pool.hpp>
+#include <rest_api/mysql_conn_pool.hpp>
 
 const char* allocate_string(const char* str)
 {

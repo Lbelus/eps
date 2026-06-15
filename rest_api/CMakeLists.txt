@@ -33,6 +33,8 @@ function(build_mysqlpp_lib target_name)
     if (ENABLE_MYSQLPP)
         find_library(MYSQLPP_LIB mysqlpp REQUIRED)
         find_library(MYSQLCLIENT_LIB mysqlclient REQUIRED)
+        find_path(MYSQLCLIENT_INCLUDE_DIR mysql.h PATH_SUFFIXES mysql REQUIRED)
+        target_include_directories(${target_name} PUBLIC ${MYSQLCLIENT_INCLUDE_DIR})
         target_link_libraries(${target_name}
               PRIVATE
                   ${MYSQLPP_LIB}

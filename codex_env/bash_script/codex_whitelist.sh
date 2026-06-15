@@ -195,6 +195,10 @@ case "$cmd" in
     docker exec "$REST_CONTAINER" bash -lc 'cd /workspace && mkdir -p build && cd build && rm -rf ./* && cmake .. -DENABLE_BETA_FLAGS=ON && make'
     ;;
 
+  build-package)
+    docker exec "$REST_CONTAINER" bash -lc 'cd /workspace && mkdir -p build && cd build && rm -rf ./* && cmake .. -DENABLE_SHARED=ON && make'
+    ;;
+
   unit-tests)
     docker exec "$REST_CONTAINER" bash -lc 'cd /workspace && mkdir -p build && cd build && rm -rf ./* && cmake .. -DENABLE_GTEST=ON && make repo_tests && ctest --test-dir . --output-on-failure'
     ;;
@@ -291,7 +295,7 @@ SQL
 
   *)
     echo "Denied command: $cmd" >&2
-    echo "Allowed: build-dev run-dev start-dev stop-dev rm-dev ps logs-rest logs-front logs-mysql ip exec exec-sh exec-rest exec-front exec-mysql build build-full build-beta unit-tests run-api front-lint front-typecheck front-build front-test shell-rest shell-front mysql init-docs-db drop-docs-db migration-counts test-docs-read-all test-docs-read-page test-doc-by-id test-doc-pages test-doc-search front-smoke" >&2
+    echo "Allowed: build-dev run-dev start-dev stop-dev rm-dev ps logs-rest logs-front logs-mysql ip exec exec-sh exec-rest exec-front exec-mysql build build-full build-beta build-package unit-tests run-api front-lint front-typecheck front-build front-test shell-rest shell-front mysql init-docs-db drop-docs-db migration-counts test-docs-read-all test-docs-read-page test-doc-by-id test-doc-pages test-doc-search front-smoke" >&2
     exit 2
     ;;
 esac

@@ -381,3 +381,12 @@ re_beta()
     ./build/rest_api
 }
 
+build_package()
+{
+    clear
+    cd build/
+    rm -r *
+    cmake .. -DENABLE_SHARED=ON
+    make
+    cd ..
+}
