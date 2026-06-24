@@ -13,26 +13,44 @@ sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 
 
+# Render PDFs at a lower DPI and only a few pages at a time so peak memory is
+# bounded regardless of document size (a 263-page PDF no longer loads at once).
+OCR_DPI = 150
+PAGE_WINDOW = 4  # pages rendered into RAM per worker at any moment
+
+
 def ocr_single_pdf(filepath: str) -> dict:
-    """OCR a single PDF and return structured data. Runs in a worker process."""
-    from pdf2image import convert_from_path
+    """OCR a single PDF page-by-page (bounded memory). Runs in a worker process."""
+    from pdf2image import convert_from_path, pdfinfo_from_path
     from PIL import ImageOps, ImageEnhance
     import pytesseract
 
     filepath = Path(filepath)
     try:
-        pages_img = convert_from_path(filepath)
+        total = int(pdfinfo_from_path(filepath)["Pages"])
     except Exception as e:
-        return {"error": str(e), "filename": filepath.name}
+        return {"error": f"pdfinfo: {e}", "filename": filepath.name}
 
     pages = []
-    for i, img in enumerate(pages_img, start=1):
-        # Preprocess: grayscale → invert → contrast boost (matches doc_serializer)
-        gray = img.convert("L")
-        inverted = ImageOps.invert(gray)
-        enhanced = ImageEnhance.Contrast(inverted).enhance(2.0)
-        text = pytesseract.image_to_string(enhanced)
-        pages.append({"number": i, "text": text})
+    try:
+        for start in range(1, total + 1, PAGE_WINDOW):
+            end = min(start + PAGE_WINDOW - 1, total)
+            window = convert_from_path(
+                filepath, dpi=OCR_DPI, first_page=start, last_page=end
+            )
+            for offset, img in enumerate(window):
+                # Preprocess: grayscale → invert → contrast boost (matches doc_serializer)
+                gray = img.convert("L")
+                inverted = ImageOps.invert(gray)
+                enhanced = ImageEnhance.Contrast(inverted).enhance(2.0)
+                text = pytesseract.image_to_string(enhanced)
+                pages.append({"number": start + offset, "text": text})
+                # Free the page bitmaps before moving on so they don't accumulate.
+                for im in (img, gray, inverted, enhanced):
+                    im.close()
+            del window
+    except Exception as e:
+        return {"error": str(e), "filename": filepath.name}
 
     return {
         "filename": filepath.name,
@@ -57,7 +75,8 @@ def ingest_all(input_dir: str, db_path: str, workers: int = None):
         return
 
     if workers is None:
-        workers = min(os.cpu_count() - 1, 4) if os.cpu_count() and os.cpu_count() > 1 else 1
+        # Cap at 2 by default: peak memory ≈ workers × PAGE_WINDOW pages.
+        workers = min(os.cpu_count() - 1, 2) if os.cpu_count() and os.cpu_count() > 1 else 1
 
     print(f"[ingest] using {workers} workers")
 
