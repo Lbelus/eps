@@ -12,7 +12,8 @@ server:
   threads: 4
   allowed_origins: https://eps.example.com
 
-mysql:
+db_config:
+  db_type: mysql
   # host = MySQL server hostname (Docker service name when in sqlRest network).
   host: mysqlserver
   port: 3306

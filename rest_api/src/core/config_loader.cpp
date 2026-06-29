@@ -10,6 +10,15 @@ int find_ch(char* str, char ch)
     return index;
 }
 
+void to_lower(std::string& str)
+{
+    std::transform(str.begin(), str.end(), str.begin(),
+        [](unsigned char ch)
+        { 
+            return static_cast<char>(std::tolower(ch));
+        });
+}
+
 static std::string trim(const std::string& input)
 {
     const std::string whitespace = " \t\r\n";
@@ -101,6 +110,9 @@ std::vector<std::string> split_fc(const std::string& str, char ch)
 
 string_code map_string(const std::string& str)
 {
+    if (str == "db_type")
+        return string_code::db_type;
+
     if (str == "host")
         return string_code::host;
 
@@ -143,6 +155,19 @@ std::string get_required_env(const std::string& name)
     return std::string(value);
 }
 
+DbType map_db_string(std::string db_type)
+{
+    to_lower(db_type);
+    if (db_type == "mysql") 
+        return DbType::MySql;
+
+    if (db_type == "redis")
+        return DbType::Redis;
+
+    if (db_type == "PostgreSQL"
+        return DbType::PostgreSQL;
+}
+
 void parser(app_config_t& config, const std::string& section, const std::vector<std::string> vec)
 {   
     if (vec.size() < 2)
@@ -157,25 +182,25 @@ void parser(app_config_t& config, const std::string& section, const std::vector<
         switch (map_string(key))
         {
             case string_code::host:
-                config.server.host = value;
+                config.server_config.host = value;
                 break;
 
             case string_code::bind_addr:
-                config.server.bind_addr = value;
+                config.server_config.bind_addr = value;
                 break;
 
             case string_code::port:
-                config.server.port = static_cast<unsigned short>(
-                    parse_uint("server.port", value)
+                config.server_config.port = static_cast<unsigned short>(
+                    parse_uint("server_config.port", value)
                 );
                 break;
 
             case string_code::threads:
-                config.server.threads = parse_uint("server.threads", value);
+                config.server_config.threads = parse_uint("server.threads", value);
                 break;
 
             case string_code::allowed_origins:
-                config.server.allowed_origins = value;
+                config.server_config.allowed_origins = value;
                 break;
 
             default:
@@ -185,45 +210,47 @@ void parser(app_config_t& config, const std::string& section, const std::vector<
         return;
     }
 
-    if (section == "mysql")
+    if (section == "db")
     {
         switch (map_string(key))
         {
+            case string_code::db_type:
+                config.db_config.db_type = map_db_string(value);
+                break;
+
             case string_code::host:
-                config.mysql.host = value;
+                config.db_config.host = value;
                 break;
 
             case string_code::port:
-                config.mysql.port = parse_uint("mysql.port", value);
+                config.db_config.port = parse_uint("mysql.port", value);
                 break;
 
             case string_code::user:
-                config.mysql.user = value;
+                config.db_config.user = value;
                 break;
 
             case string_code::password:
-                config.mysql.password = value;
-                config.mysql.password = get_required_env(config.mysql.password);
+                config.db_config.password = value;
+                config.db_config.password = get_required_env(config.mysql.password);
                 break;
 
             case string_code::database:
-                config.mysql.database = value;
+                config.db_config.database = value;
                 break;
 
             case string_code::pool_size:
-                config.mysql.pool_size = parse_uint("mysql.pool_size", value);
+                config.db_config.pool_size = parse_uint("mysql.pool_size", value);
                 break;
 
             default:
-                throw std::runtime_error("Unknown mysql config key: " + key);
+                throw std::runtime_error("Unknown db_config config key: " + key);
         }
 
         return;
     }
-
     throw std::runtime_error("Unknown config section: " + section);
 }
-
 
 app_config_t load_config(const char* filename)
 {
@@ -261,6 +288,6 @@ app_config_t load_config(const char* filename)
             parser(config, current_section, vec);
         }
     }
-    std::cout << "success... proceding to boot rest api server..." << std::endl;
+    std::cout << "success... proceding to boot rest api server_config..." << std::endl;
     return config;
 }

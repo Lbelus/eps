@@ -12,18 +12,26 @@
 #include <stdexcept>
 #include <string>
 
+
 #ifndef CONFIG_STRUCT
 #define CONFIG_STRUCT
-struct MySql_config_s
+// struct MySql_config_s
+// {
+//     std::string host;
+//     unsigned int port;
+//     std::string user;
+//     std::string password;
+//     std::string database;
+//     unsigned int pool_size;
+// };
+// typedef struct MySql_config_s MySql_config_t;
+
+enum class DbType
 {
-    std::string host;
-    unsigned int port;
-    std::string user;
-    std::string password;
-    std::string database;
-    unsigned int pool_size;
+      MySQL,
+      Redis,
+      PostgreSQL
 };
-typedef struct MySql_config_s MySql_config_t;
 
 struct server_config_s
 {
@@ -36,15 +44,28 @@ struct server_config_s
 };
 typedef struct server_config_s server_config_t;
 
+struct db_config_s
+{
+    DbType type;
+    std::string host;
+    unsigned int port;
+    std::string user;
+    std::string password;
+    std::string database;
+    unsigned int pool_size;
+};
+typedef struct db_config_s db_config_t;
+
 struct app_config_s
 {
-    server_config_t server;
-    MySql_config_t mysql;
+    server_config_t server_config;
+    db_config_t db_config;
 };
 typedef struct app_config_s app_config_t;
 
 enum class string_code
 {
+    db_type,
     host,
     bind_addr,
     port,
