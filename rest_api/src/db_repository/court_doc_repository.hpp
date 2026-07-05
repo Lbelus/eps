@@ -267,6 +267,14 @@ public:
             return EXIT_FAILURE;
         }
 
+        // Snippets need only the text around the first match, so fetch a
+        // bounded excerpt instead of the whole LONGTEXT per hit. LOCATE is
+        // case-insensitive under utf8mb4_unicode_ci. If the anchor term is
+        // absent LOCATE yields 0 and the window falls back to the document
+        // start, matching build_snippet's own fallback.
+        const std::vector<std::string> anchor_terms = split_terms(user_query);
+        const std::string anchor = anchor_terms.empty() ? user_query : anchor_terms.front();
+
         mysqlpp::Query query = conn().query(
             "SELECT "
             "  document_id, "
@@ -275,16 +283,19 @@ public:
             "  page_count, "
             "  MATCH(full_text) AGAINST (%0q IN NATURAL LANGUAGE MODE) AS score, "
             "  created_at, "
-            "  full_text "
+            "  SUBSTRING(full_text, "
+            "            GREATEST(CAST(LOCATE(%1q, full_text) AS SIGNED) - 4000, 1), "
+            "            8000) AS excerpt "
             "FROM documents "
-            "WHERE MATCH(full_text) AGAINST (%1q IN NATURAL LANGUAGE MODE) "
+            "WHERE MATCH(full_text) AGAINST (%2q IN NATURAL LANGUAGE MODE) "
             "ORDER BY score DESC, document_id DESC "
-            "LIMIT %2 OFFSET %3"
+            "LIMIT %3 OFFSET %4"
         );
         query.parse();
 
         mysqlpp::StoreQueryResult result = query.store(
             user_query,
+            anchor,
             user_query,
             mysqlpp::sql_int(limit),
             mysqlpp::sql_int(offset)
@@ -307,8 +318,8 @@ public:
             hit.score       = double(row[4]);
             hit.created_at  = safe_string(row[5]);
 
-            const std::string full_text = safe_string(row[6]);
-            hit.snippet = build_snippet(full_text, user_query, 120);
+            const std::string excerpt = safe_string(row[6]);
+            hit.snippet = build_snippet(excerpt, user_query, 120);
 
             search_results_.push_back(std::move(hit));
         }
