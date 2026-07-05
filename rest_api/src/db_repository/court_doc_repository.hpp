@@ -112,6 +112,18 @@ struct court_document_search_result_s
 typedef struct court_document_search_result_s cdsr_t;
 #endif
 
+// Snippet slice offsets are byte positions; nudge them forward off UTF-8
+// continuation bytes so a slice never cuts a multi-byte character in half
+// and emits invalid UTF-8 into JSON responses.
+inline std::size_t utf8_align_forward(const std::string& text, std::size_t pos)
+{
+    while (pos < text.size() && (static_cast<unsigned char>(text[pos]) & 0xC0) == 0x80)
+    {
+        ++pos;
+    }
+    return pos;
+}
+
 // OPTIONAL: You can add a convenience ctor
 // static ExampleUser make_new_example_user(const std::string& name, const std::string& email)
 // {
@@ -612,7 +624,7 @@ private:
 
         if (best_pos == std::string::npos)
         {
-            std::string fallback = text.substr(0, std::min(text.size(), radius * 2));
+            std::string fallback = text.substr(0, utf8_align_forward(text, std::min(text.size(), radius * 2)));
             if (text.size() > fallback.size())
             {
                 fallback += "...";
@@ -620,8 +632,8 @@ private:
             return fallback;
         }
 
-        const std::size_t start = (best_pos > radius) ? best_pos - radius : 0;
-        const std::size_t end = std::min(text.size(), best_pos + best_len + radius);
+        const std::size_t start = utf8_align_forward(text, (best_pos > radius) ? best_pos - radius : 0);
+        const std::size_t end = utf8_align_forward(text, std::min(text.size(), best_pos + best_len + radius));
         std::string snippet = text.substr(start, end - start);
 
         if (start > 0)
@@ -937,7 +949,7 @@ private:
 
         if (best_pos == std::string::npos)
         {
-            std::string fallback = text.substr(0, std::min(text.size(), radius * 2));
+            std::string fallback = text.substr(0, utf8_align_forward(text, std::min(text.size(), radius * 2)));
             if (text.size() > fallback.size())
             {
                 fallback += "...";
@@ -945,8 +957,8 @@ private:
             return fallback;
         }
 
-        const std::size_t start = (best_pos > radius) ? best_pos - radius : 0;
-        const std::size_t end = std::min(text.size(), best_pos + best_len + radius);
+        const std::size_t start = utf8_align_forward(text, (best_pos > radius) ? best_pos - radius : 0);
+        const std::size_t end = utf8_align_forward(text, std::min(text.size(), best_pos + best_len + radius));
         std::string snippet = text.substr(start, end - start);
 
         if (start > 0)
