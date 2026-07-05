@@ -202,7 +202,7 @@ public:
         clear_state();
 
         mysqlpp::Query query = conn().query(
-            "SELECT document_id, filename, source, page_count, full_text, created_at "
+            "SELECT document_id, filename, source, page_count, created_at "
             "FROM documents "
             "ORDER BY document_id DESC "
             "LIMIT %0 OFFSET %1"
@@ -223,7 +223,7 @@ public:
         mapped_entry_vec_.reserve(result.num_rows());
         for (const auto& row : result)
         {
-            mapped_entry_vec_.emplace_back(row_to_document(row));
+            mapped_entry_vec_.emplace_back(row_to_document_metadata(row));
         }
 
         return EXIT_SUCCESS;
@@ -354,13 +354,26 @@ public:
         return obj;
     }
 
+    // Metadata-only projection: full_text is served by GET /courtdocuments/<id>
+    // and per page via /courtdocuments/<id>/pages, never in list responses.
+    static crow::json::wvalue to_crow_json_metadata(const CourtDocument& doc)
+    {
+        crow::json::wvalue obj;
+        obj["document_id"] = doc.document_id;
+        obj["filename"]    = std::string(doc.filename);
+        obj["source"]      = std::string(doc.source);
+        obj["page_count"]  = doc.page_count;
+        obj["created_at"]  = doc.created_at.str();
+        return obj;
+    }
+
     static crow::json::wvalue to_crow_json(const std::vector<CourtDocument>& docs)
     {
         crow::json::wvalue::list arr;
         arr.reserve(docs.size());
         for (const auto& doc : docs)
         {
-            arr.push_back(to_crow_json(doc));
+            arr.push_back(to_crow_json_metadata(doc));
         }
         return crow::json::wvalue(arr);
     }
@@ -470,6 +483,18 @@ private:
         doc.page_count  = int(row[3]);
         doc.full_text   = safe_string(row[4]);
         doc.created_at  = mysqlpp::DateTime(safe_string(row[5]));
+        return doc;
+    }
+
+    // For list queries that skip the LONGTEXT column; full_text stays empty.
+    static CourtDocument row_to_document_metadata(const mysqlpp::Row& row)
+    {
+        CourtDocument doc = create_empty_document();
+        doc.document_id = int(row[0]);
+        doc.filename    = safe_string(row[1]);
+        doc.source      = safe_string(row[2]);
+        doc.page_count  = int(row[3]);
+        doc.created_at  = mysqlpp::DateTime(safe_string(row[4]));
         return doc;
     }
 
