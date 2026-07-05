@@ -978,6 +978,27 @@ using CourtDocumentsRepositoryImpl = MySqlCourtDocumentsRepository;
 /*
  * STEP 6: Routes
  */
+
+// std::stoul throws on garbage input; malformed or oversized values fall
+// back to the default / cap so a bad query string can't 500 the handler
+// or request an unbounded result set.
+inline std::size_t parse_size_param(const char* raw, std::size_t fallback, std::size_t max_value)
+{
+    if (!raw || *raw == '\0')
+    {
+        return fallback;
+    }
+
+    char* end = nullptr;
+    const unsigned long parsed = std::strtoul(raw, &end, 10);
+    if (end == raw || *end != '\0')
+    {
+        return fallback;
+    }
+
+    return std::min<std::size_t>(parsed, max_value);
+}
+
 template <typename... Middlewares>
 void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectionPool& pool_ptr)
 {
@@ -1005,8 +1026,8 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
         mysqlpp::ScopedConnection sc(pool_ptr, true);
         CourtDocumentsRepositoryImpl repo(sc);
 
-        std::size_t limit  = req.url_params.get("limit")  ? std::stoul(req.url_params.get("limit"))  : 100;
-        std::size_t offset = req.url_params.get("offset") ? std::stoul(req.url_params.get("offset")) : 0;
+        std::size_t limit  = parse_size_param(req.url_params.get("limit"), 100, 100);
+        std::size_t offset = parse_size_param(req.url_params.get("offset"), 0, 1000000);
 
         int result = repo.list_all(limit, offset);
         if (result != EXIT_SUCCESS)
@@ -1048,8 +1069,8 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
             return crow::response(400, "Missing q parameter");
         }
 
-        std::size_t limit  = req.url_params.get("limit")  ? std::stoul(req.url_params.get("limit"))  : 20;
-        std::size_t offset = req.url_params.get("offset") ? std::stoul(req.url_params.get("offset")) : 0;
+        std::size_t limit  = parse_size_param(req.url_params.get("limit"), 20, 50);
+        std::size_t offset = parse_size_param(req.url_params.get("offset"), 0, 10000);
 
         int result = repo.search_fulltext(q, limit, offset);
         if (result != EXIT_SUCCESS)
