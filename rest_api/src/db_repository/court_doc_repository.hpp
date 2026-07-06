@@ -112,6 +112,18 @@ struct court_document_search_result_s
 typedef struct court_document_search_result_s cdsr_t;
 #endif
 
+// Snippet slice offsets are byte positions; nudge them forward off UTF-8
+// continuation bytes so a slice never cuts a multi-byte character in half
+// and emits invalid UTF-8 into JSON responses.
+inline std::size_t utf8_align_forward(const std::string& text, std::size_t pos)
+{
+    while (pos < text.size() && (static_cast<unsigned char>(text[pos]) & 0xC0) == 0x80)
+    {
+        ++pos;
+    }
+    return pos;
+}
+
 // OPTIONAL: You can add a convenience ctor
 // static ExampleUser make_new_example_user(const std::string& name, const std::string& email)
 // {
@@ -202,7 +214,7 @@ public:
         clear_state();
 
         mysqlpp::Query query = conn().query(
-            "SELECT document_id, filename, source, page_count, full_text, created_at "
+            "SELECT document_id, filename, source, page_count, created_at "
             "FROM documents "
             "ORDER BY document_id DESC "
             "LIMIT %0 OFFSET %1"
@@ -223,7 +235,7 @@ public:
         mapped_entry_vec_.reserve(result.num_rows());
         for (const auto& row : result)
         {
-            mapped_entry_vec_.emplace_back(row_to_document(row));
+            mapped_entry_vec_.emplace_back(row_to_document_metadata(row));
         }
 
         return EXIT_SUCCESS;
@@ -267,6 +279,14 @@ public:
             return EXIT_FAILURE;
         }
 
+        // Snippets need only the text around the first match, so fetch a
+        // bounded excerpt instead of the whole LONGTEXT per hit. LOCATE is
+        // case-insensitive under utf8mb4_unicode_ci. If the anchor term is
+        // absent LOCATE yields 0 and the window falls back to the document
+        // start, matching build_snippet's own fallback.
+        const std::vector<std::string> anchor_terms = split_terms(user_query);
+        const std::string anchor = anchor_terms.empty() ? user_query : anchor_terms.front();
+
         mysqlpp::Query query = conn().query(
             "SELECT "
             "  document_id, "
@@ -275,16 +295,19 @@ public:
             "  page_count, "
             "  MATCH(full_text) AGAINST (%0q IN NATURAL LANGUAGE MODE) AS score, "
             "  created_at, "
-            "  full_text "
+            "  SUBSTRING(full_text, "
+            "            GREATEST(CAST(LOCATE(%1q, full_text) AS SIGNED) - 4000, 1), "
+            "            8000) AS excerpt "
             "FROM documents "
-            "WHERE MATCH(full_text) AGAINST (%1q IN NATURAL LANGUAGE MODE) "
+            "WHERE MATCH(full_text) AGAINST (%2q IN NATURAL LANGUAGE MODE) "
             "ORDER BY score DESC, document_id DESC "
-            "LIMIT %2 OFFSET %3"
+            "LIMIT %3 OFFSET %4"
         );
         query.parse();
 
         mysqlpp::StoreQueryResult result = query.store(
             user_query,
+            anchor,
             user_query,
             mysqlpp::sql_int(limit),
             mysqlpp::sql_int(offset)
@@ -307,8 +330,8 @@ public:
             hit.score       = double(row[4]);
             hit.created_at  = safe_string(row[5]);
 
-            const std::string full_text = safe_string(row[6]);
-            hit.snippet = build_snippet(full_text, user_query, 120);
+            const std::string excerpt = safe_string(row[6]);
+            hit.snippet = build_snippet(excerpt, user_query, 120);
 
             search_results_.push_back(std::move(hit));
         }
@@ -354,13 +377,26 @@ public:
         return obj;
     }
 
+    // Metadata-only projection: full_text is served by GET /courtdocuments/<id>
+    // and per page via /courtdocuments/<id>/pages, never in list responses.
+    static crow::json::wvalue to_crow_json_metadata(const CourtDocument& doc)
+    {
+        crow::json::wvalue obj;
+        obj["document_id"] = doc.document_id;
+        obj["filename"]    = std::string(doc.filename);
+        obj["source"]      = std::string(doc.source);
+        obj["page_count"]  = doc.page_count;
+        obj["created_at"]  = doc.created_at.str();
+        return obj;
+    }
+
     static crow::json::wvalue to_crow_json(const std::vector<CourtDocument>& docs)
     {
         crow::json::wvalue::list arr;
         arr.reserve(docs.size());
         for (const auto& doc : docs)
         {
-            arr.push_back(to_crow_json(doc));
+            arr.push_back(to_crow_json_metadata(doc));
         }
         return crow::json::wvalue(arr);
     }
@@ -473,6 +509,18 @@ private:
         return doc;
     }
 
+    // For list queries that skip the LONGTEXT column; full_text stays empty.
+    static CourtDocument row_to_document_metadata(const mysqlpp::Row& row)
+    {
+        CourtDocument doc = create_empty_document();
+        doc.document_id = int(row[0]);
+        doc.filename    = safe_string(row[1]);
+        doc.source      = safe_string(row[2]);
+        doc.page_count  = int(row[3]);
+        doc.created_at  = mysqlpp::DateTime(safe_string(row[4]));
+        return doc;
+    }
+
     static CourtPages row_to_page(const mysqlpp::Row& row)
     {
         CourtPages page = create_empty_page();
@@ -576,7 +624,7 @@ private:
 
         if (best_pos == std::string::npos)
         {
-            std::string fallback = text.substr(0, std::min(text.size(), radius * 2));
+            std::string fallback = text.substr(0, utf8_align_forward(text, std::min(text.size(), radius * 2)));
             if (text.size() > fallback.size())
             {
                 fallback += "...";
@@ -584,8 +632,8 @@ private:
             return fallback;
         }
 
-        const std::size_t start = (best_pos > radius) ? best_pos - radius : 0;
-        const std::size_t end = std::min(text.size(), best_pos + best_len + radius);
+        const std::size_t start = utf8_align_forward(text, (best_pos > radius) ? best_pos - radius : 0);
+        const std::size_t end = utf8_align_forward(text, std::min(text.size(), best_pos + best_len + radius));
         std::string snippet = text.substr(start, end - start);
 
         if (start > 0)
@@ -901,7 +949,7 @@ private:
 
         if (best_pos == std::string::npos)
         {
-            std::string fallback = text.substr(0, std::min(text.size(), radius * 2));
+            std::string fallback = text.substr(0, utf8_align_forward(text, std::min(text.size(), radius * 2)));
             if (text.size() > fallback.size())
             {
                 fallback += "...";
@@ -909,8 +957,8 @@ private:
             return fallback;
         }
 
-        const std::size_t start = (best_pos > radius) ? best_pos - radius : 0;
-        const std::size_t end = std::min(text.size(), best_pos + best_len + radius);
+        const std::size_t start = utf8_align_forward(text, (best_pos > radius) ? best_pos - radius : 0);
+        const std::size_t end = utf8_align_forward(text, std::min(text.size(), best_pos + best_len + radius));
         std::string snippet = text.substr(start, end - start);
 
         if (start > 0)
@@ -942,6 +990,27 @@ using CourtDocumentsRepositoryImpl = MySqlCourtDocumentsRepository;
 /*
  * STEP 6: Routes
  */
+
+// std::stoul throws on garbage input; malformed or oversized values fall
+// back to the default / cap so a bad query string can't 500 the handler
+// or request an unbounded result set.
+inline std::size_t parse_size_param(const char* raw, std::size_t fallback, std::size_t max_value)
+{
+    if (!raw || *raw == '\0')
+    {
+        return fallback;
+    }
+
+    char* end = nullptr;
+    const unsigned long parsed = std::strtoul(raw, &end, 10);
+    if (end == raw || *end != '\0')
+    {
+        return fallback;
+    }
+
+    return std::min<std::size_t>(parsed, max_value);
+}
+
 template <typename... Middlewares>
 void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectionPool& pool_ptr)
 {
@@ -969,8 +1038,8 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
         mysqlpp::ScopedConnection sc(pool_ptr, true);
         CourtDocumentsRepositoryImpl repo(sc);
 
-        std::size_t limit  = req.url_params.get("limit")  ? std::stoul(req.url_params.get("limit"))  : 100;
-        std::size_t offset = req.url_params.get("offset") ? std::stoul(req.url_params.get("offset")) : 0;
+        std::size_t limit  = parse_size_param(req.url_params.get("limit"), 100, 100);
+        std::size_t offset = parse_size_param(req.url_params.get("offset"), 0, 1000000);
 
         int result = repo.list_all(limit, offset);
         if (result != EXIT_SUCCESS)
@@ -1012,8 +1081,8 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
             return crow::response(400, "Missing q parameter");
         }
 
-        std::size_t limit  = req.url_params.get("limit")  ? std::stoul(req.url_params.get("limit"))  : 20;
-        std::size_t offset = req.url_params.get("offset") ? std::stoul(req.url_params.get("offset")) : 0;
+        std::size_t limit  = parse_size_param(req.url_params.get("limit"), 20, 50);
+        std::size_t offset = parse_size_param(req.url_params.get("offset"), 0, 10000);
 
         int result = repo.search_fulltext(q, limit, offset);
         if (result != EXIT_SUCCESS)
