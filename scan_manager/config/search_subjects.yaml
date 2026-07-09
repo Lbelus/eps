@@ -30,6 +30,9 @@ legal:
   - Jay Lefkowitz
   - Gerald Lefcourt
   - Lawrence Krauss
+  - Barry Krischer
+  - Bradley Edwards
+  - David Boies
 
 # Business & finance
 business:
@@ -41,6 +44,9 @@ business:
   - Jes Staley
   - Reid Hoffman
   - Peter Mandelson
+  - Darren Indyke
+  - Richard Kahn
+  - Steven Hoffenberg
 
 # Entertainment & modeling
 entertainment:
@@ -57,6 +63,10 @@ inner_circle:
   - Adriana Ross
   - Juan Alessi
   - Haley Robson
+  - Alfredo Rodriguez
+  - Cimberly Espinosa
+  - Emmy Tayler
+  - Rinaldo Rizzo
 
 # Victims who have gone public (named in unsealed filings)
 victims_public:
@@ -64,6 +74,10 @@ victims_public:
   - Courtney Wild
   - Annie Farmer
   - Maria Farmer
+  - Sarah Ransome
+  - Johanna Sjoberg
+  - Jennifer Araoz
+  - Carolyn Andriano
 
 # ---------------------------------------------------------------------------
 # Search queries — combined phrases for broader document discovery
@@ -77,3 +91,16 @@ queries:
   - Epstein victim testimony
   - Little St James
   - Zorro Ranch
+  - Great St James
+  - El Brillo Way
+  - 'Epstein AND "non-prosecution agreement"'
+  - 'Epstein AND "grand jury"'
+  - 'Epstein AND "Palm Beach" AND police'
+  - '"Southern Trust Company"'
+  - '"Financial Trust Company"'
+  - '"MC2 Model Management"'
+  - '"Terramar Project"'
+  - 'Epstein AND JPMorgan'
+  - 'Epstein AND "Deutsche Bank"'
+  - 'Epstein AND estate AND settlement'
+  - '"Epstein Files Transparency Act"'
