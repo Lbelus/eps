@@ -1,217 +1,198 @@
 #ifndef CONNECTION_FACTORY_HPP
 #define CONNECTION_FACTORY_HPP
 
+#include <algorithm>
+#include <cstdint>
 #include <iostream>
-#include <memory> 
+#include <map>
+#include <memory>
+#include <stdexcept>
+#include <vector>
 
-
-// FACTORY DESIGN PATTERN WITH RAII
-
-// per recommandation : Avoid overuse of raw new by making use of smart pointers and RAII principles 
-
+#include <rest_api/config_loader.hpp>
+#include <rest_api/mysql_conn_pool.hpp>
 
 class IConnectionPool
 {
 public:
     using Id = std::uint64_t;
-    IConnection()
+
+    IConnectionPool()
         : id_(next_id_++)
-    {
-        std::cout << "Connection object generated"
-    }
-    
+    {}
+
+    virtual ~IConnectionPool() = default;
+
     Id id() const
     {
         return id_;
     }
+
     virtual bool connect() = 0;
     virtual void disconnect() = 0;
-    virtual int is_connected() const = 0;
-    virtual ~IConnection() = default;
-    {
-        std::cout << "Connection object destroyed"
-    };
-    private:
+    virtual bool is_connected() const = 0;
+
+private:
     Id id_;
     static inline Id next_id_ = 1;
 };
 
 class MySqlConnectionPool : public IConnectionPool
 {
-private:
-    const db_config_t* config;
-    std::unique_ptr<SimpleConnectionPool> pool_;
-
 public:
-    MySqlConnection(const db_config_t* config)
-    : config(config) id_(next_id_++)
-    {
-        std::cout << "My sql connection pool configuration loaded" << std::endl;
-    }
+    explicit MySqlConnectionPool(const db_config_t& config)
+        : config_(config),
+          mysql_config_{
+              config.database,
+              config.host,
+              config.user,
+              config.password,
+              config.port
+          }
+    {}
 
-    int connect() override
+    bool connect() override
     {
-        SimpleConnectionPool pool(config);
         if (!mysqlpp::Connection::thread_aware())
         {
             std::cerr << "MySQL++/libmysqlclient not built thread-aware on this system\n";
-            return EXIT_FAILURE;
+            return false;
         }
-        pool_ = std::make_unique<SimpleConnectionPool>(config_);
-        return EXIT_SUCCESS;
+
+        pool_ = std::make_unique<SimpleConnectionPool>(mysql_config_);
+        return true;
+    }
+
+    void disconnect() override
+    {
+        pool_.reset();
+    }
+
+    bool is_connected() const override
+    {
+        return static_cast<bool>(pool_);
     }
 
     SimpleConnectionPool& pool()
     {
         if (!pool_)
-            throw std::runtime_error("Pool not connected");
+        {
+            throw std::runtime_error("MySQL connection pool is not connected");
+        }
 
         return *pool_;
     }
 
-    void disconnect() override
+    const db_config_t& config() const
     {
-
+        return config_;
     }
 
-    bool is_connected() override
-    {
-
-    }
+private:
+    db_config_t config_;
+    mysql_pool_config_t mysql_config_;
+    std::unique_ptr<SimpleConnectionPool> pool_;
 };
 
-class ConnectionPoolFactory 
+class ConnectionPoolFactory
 {
 public:
-    static std::unique_ptr<IConnection> create(const db_config_t config);
+    static std::unique_ptr<IConnectionPool> create(const db_config_t& config)
     {
         switch (config.type)
         {
             case DbType::MySQL:
-            return std::make_unique<MySqlConnectionPool>(config); 
-            
-            case DbType::Redis: 
-            return std::make_unique<RedisConnectionPool>(config);
+                return std::make_unique<MySqlConnectionPool>(config);
 
-            case DbType::PostgreSQL: 
-            return std::make_unique<RedisConnectionPool>(config);
+            case DbType::Redis:
+                throw std::runtime_error("Redis connection pools are not implemented yet");
+
+            case DbType::PostgreSQL:
+                throw std::runtime_error("PostgreSQL connection pools are not implemented yet");
+
+            case DbType::unknown:
+                break;
         }
-    };
-    ~ConnectionFactory();
+
+        throw std::runtime_error("Unknown database type for connection pool");
+    }
 };
 
-
-class connectionPoolRegistry
+class ConnectionPoolRegistry
 {
-private:
-    std::vector<std::unique_ptr<IConnectionPool> pool_vec;        
 public:
-    using Id = std::uint64_t;
-
-    void add_connection_pool()
+    using Id = IConnectionPool::Id;
+    void update_route_map(Id id, const std::vector<std::string>& routes)
     {
-        pool_vec.emplace_back(std:move(pool_vec);
+        for (const auto& route : routes)
+        {
+            route_map_[route] = id;
+        }
+    }
+
+    Id add(std::unique_ptr<IConnectionPool> pool, const db_config_t& config)
+    {
+        if (!pool)
+        {
+            throw std::invalid_argument("Cannot register a null connection pool");
+        }
+
+        const Id id = pool->id();
+        pools_.emplace_back(std::move(pool));
+        update_route_map(id, config.route_vec);
+        return id;
+    }
+
+
+    Id create_and_add(const db_config_t& config)
+    {
+        return add(ConnectionPoolFactory::create(config), config);
+    }
+
+    IConnectionPool& get(Id id)
+    {
+        auto it = find_pool(id);
+        if (it == pools_.end())
+        {
+            throw std::runtime_error("Connection pool not found");
+        }
+        return **it;
     }
 
     bool remove(Id id)
     {
-        int index = 0;
-        for (const auto& pool : pools)
+        auto it = find_pool(id);
+        if (it == pools_.end())
         {
-            if (pool.id() == id)
-            {
-                pools.erase(begin() + index);
-                return true;
-            }
-            index += 1;
+            return false;
         }
-        std::cout << "Could not find pool at index: " << id << std::endl;
+
+        pools_.erase(it);
+        return true;
     }
 
-    
+    void clear()
+    {
+        pools_.clear();
+        route_map_.clear();
+    }
 
+private:
+    using PoolIterator = std::vector<std::unique_ptr<IConnectionPool>>::iterator;
 
+    PoolIterator find_pool(Id id)
+    {
+        return std::find_if(
+            pools_.begin(),
+            pools_.end(),
+            [id](const std::unique_ptr<IConnectionPool>& pool)
+            {
+                return pool->id() == id;
+            }
+        );
+    }
+    std::map<std::string, Id> route_map_;
+    std::vector<std::unique_ptr<IConnectionPool>> pools_;
 };
 
-
-// class Destroyer : public Battleship
-// {
-// public:
-//     Destroyer()
-//     {
-//         std::cout << "Destroyer Created" << std::endl;
-//     }
-//     void Fire() override
-//     {
-//         std::cout << "Destroyer Fire" << std::endl;
-//     }
-//     void Steer() override
-//     {
-//         std::cout << "Destroyer Steer" << std::endl;
-//     }
-// };
-
-// class Carrier : public Battleship
-// {
-// public:
-//     Carrier()
-//     {
-//         std::cout << "Carrier Created" << std::endl;
-//     }
-//     void Fire() override
-//     {
-//         std::cout << "Carrier Fire" << std::endl;
-//     }
-//     void Steer() override
-//     {
-//         std::cout << "Carrier Steer" << std::endl;
-//     }
-// };
-
-// // run-time polymorphism
-
-// class ShipCreator
-// {
-// public:
-//     virtual std::unique_ptr<Battleship> FactoryMethod() = 0;
-//     virtual ~ShipCreator() {}
-
-//     std::unique_ptr<Battleship> CreateShip()
-//     {
-//         std::unique_ptr<Battleship> smart_ptr = this->FactoryMethod();
-//         return smart_ptr;
-//     }
-// };
-
-// class CarrierCreator : public ShipCreator
-// {
-//     std::unique_ptr<Battleship> FactoryMethod() override
-//     {
-//         return std::make_unique<Carrier>();
-//     }
-// };
-
-// class DestroyerCreator : public ShipCreator
-// {
-//     std::unique_ptr<Battleship> FactoryMethod() override
-//     {
-//         return std::make_unique<Destroyer>();
-//     }
-// };
-
-// int main()
-// {
-//     std::unique_ptr<ShipCreator> creator = std::make_unique<CarrierCreator>();
-//     std::unique_ptr<Battleship> battleship1 = creator->CreateShip();
-//     battleship1->Fire();
-//     battleship1->Steer();
-
-//     creator = std::make_unique<DestroyerCreator>();
-//     std::unique_ptr<Battleship> battleship2 = creator->CreateShip();
-//     battleship2->Fire();
-//     battleship2->Steer();
-
-//     return 0;
-// }
-
-// #endif
+#endif

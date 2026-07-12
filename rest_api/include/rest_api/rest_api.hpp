@@ -8,6 +8,21 @@
 #include <iostream>
 #include <string>
 #include <rest_api/config_loader.hpp>
+#include <rest_api/connection_pool_factory.hpp>
+
+
+
+
+class rest_api
+{
+public:
+    explicit rest_api(const std::string& config_file);
+    int start();
+
+private:
+    app_config_t app_config;
+    ConnectionPoolRegistry pool_reg;
+};
 
 
 const mysql_connection_t* allocate_mysql_credentials(const char* db, const char* server=0, const char* user=0, const char* password=0, unsigned int port=0);

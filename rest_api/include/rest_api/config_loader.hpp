@@ -11,7 +11,7 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <string>
-
+#include <vector> 
 
 #ifndef CONFIG_STRUCT
 #define CONFIG_STRUCT
@@ -28,9 +28,10 @@
 
 enum class DbType
 {
-      MySQL,
-      Redis,
-      PostgreSQL
+    MySQL,
+    Redis,
+    PostgreSQL,
+    unknown
 };
 
 struct server_config_s
@@ -46,6 +47,7 @@ typedef struct server_config_s server_config_t;
 
 struct db_config_s
 {
+    std::string name;
     DbType type;
     std::string host;
     unsigned int port;
@@ -53,19 +55,21 @@ struct db_config_s
     std::string password;
     std::string database;
     unsigned int pool_size;
+    std::vector<std::string> route_vec;
 };
 typedef struct db_config_s db_config_t;
 
 struct app_config_s
 {
     server_config_t server_config;
-    db_config_t db_config;
+    std::vector<db_config_t> db_config_vec;
 };
 typedef struct app_config_s app_config_t;
 
 enum class string_code
 {
-    db_type,
+    name,
+    type,
     host,
     bind_addr,
     port,
@@ -75,6 +79,7 @@ enum class string_code
     pool_size,
     threads,
     allowed_origins,
+    routes,
     unknown
 };
 #endif
