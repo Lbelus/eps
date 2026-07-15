@@ -23,8 +23,16 @@ export default function Home() {
           <Link href="/" className="text-xl font-semibold text-slate-900">
             EPS
           </Link>
-          <div className="hidden lg:block text-slate-700">
-            <ThemeChanger />
+          <div className="flex items-center gap-5 text-slate-700">
+            <Link
+              href="/contact"
+              className="text-sm font-medium text-slate-700 transition hover:text-slate-950 dark:text-slate-200 dark:hover:text-white"
+            >
+              Contact
+            </Link>
+            <div className="hidden lg:block">
+              <ThemeChanger />
+            </div>
           </div>
         </nav>
       </header>
