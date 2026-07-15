@@ -3,7 +3,7 @@ import { useForm, useWatch, SubmitHandler } from "react-hook-form";
 import { Disclosure, Transition } from "@headlessui/react";
 
 interface FormData {
-  apikey: string;
+  access_key: string;
   subject: string;
   from_name: string;
   botcheck: boolean;
@@ -131,16 +131,16 @@ const PopupWidget: React.FC = () => {
                         <input
                           type="hidden"
                           value={process.env.NEXT_PUBLIC_WEB3FORM}
-                          {...register("apikey")}
+                          {...register("access_key")}
                         />
                         <input
                           type="hidden"
-                          value={`${userName} sent a message from Nextly`}
+                          value={`${userName} sent a message to EPS`}
                           {...register("subject")}
                         />
                         <input
                           type="hidden"
-                          value="Nextly Template"
+                          value="Epstein Paper System"
                           {...register("from_name")}
                         />
                         <input
