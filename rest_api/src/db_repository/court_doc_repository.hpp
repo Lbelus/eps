@@ -151,6 +151,7 @@ struct ICourtDocumentsRepository
     virtual int list_all(std::size_t limit = 100, std::size_t offset = 0) = 0;
     virtual int get_pages_by_document_id(int document_id) = 0;
     virtual int search_fulltext(const std::string& query, std::size_t limit = 20, std::size_t offset = 0) = 0;
+    virtual int search_by_filename(const std::string& query, std::size_t limit = 20, std::size_t offset = 0) = 0;
     virtual const char* error() = 0;
     virtual CourtDocument get_mapped_entry() = 0;
     virtual std::vector<CourtDocument> get_mapped_entry_vector() = 0;
@@ -222,6 +223,48 @@ public:
         query.parse();
 
         mysqlpp::StoreQueryResult result = query.store(
+            mysqlpp::sql_int(limit),
+            mysqlpp::sql_int(offset)
+        );
+
+        if (!result)
+        {
+            error_msg_ = query.error();
+            return EXIT_FAILURE;
+        }
+
+        mapped_entry_vec_.reserve(result.num_rows());
+        for (const auto& row : result)
+        {
+            mapped_entry_vec_.emplace_back(row_to_document_metadata(row));
+        }
+
+        return EXIT_SUCCESS;
+    }
+
+    int search_by_filename(const std::string& user_query, std::size_t limit = 20, std::size_t offset = 0) override
+    {
+        clear_state();
+
+        if (user_query.empty())
+        {
+            error_msg_ = "empty filename query";
+            return EXIT_FAILURE;
+        }
+
+        mysqlpp::Query query = conn().query(
+            "SELECT document_id, filename, source, page_count, created_at "
+            "FROM documents "
+            "WHERE filename LIKE %0q "
+            "ORDER BY CASE WHEN filename = %1q THEN 0 ELSE 1 END, filename ASC, document_id DESC "
+            "LIMIT %2 OFFSET %3"
+        );
+        query.parse();
+
+        const std::string pattern = "%" + user_query + "%";
+        mysqlpp::StoreQueryResult result = query.store(
+            pattern,
+            user_query,
             mysqlpp::sql_int(limit),
             mysqlpp::sql_int(offset)
         );
@@ -716,6 +759,57 @@ public:
         return EXIT_SUCCESS;
     }
 
+    int search_by_filename(const std::string& query,
+                           std::size_t limit = 20,
+                           std::size_t offset = 0) override
+    {
+        clear_state();
+
+        if (query.empty())
+        {
+            last_error_ = "empty filename query";
+            return EXIT_FAILURE;
+        }
+
+        const std::string needle = to_lower_copy(query);
+        std::vector<CourtDocument> hits;
+
+        for (const auto& kv : documents_by_id_)
+        {
+            const CourtDocument& doc = kv.second;
+            const std::string filename = std::string(doc.filename);
+            if (to_lower_copy(filename).find(needle) != std::string::npos)
+            {
+                hits.push_back(doc);
+            }
+        }
+
+        std::sort(hits.begin(), hits.end(),
+            [&needle](const CourtDocument& a, const CourtDocument& b)
+            {
+                const std::string a_filename = to_lower_copy(std::string(a.filename));
+                const std::string b_filename = to_lower_copy(std::string(b.filename));
+                const bool a_exact = a_filename == needle;
+                const bool b_exact = b_filename == needle;
+                if (a_exact != b_exact)
+                {
+                    return a_exact;
+                }
+                if (a_filename != b_filename)
+                {
+                    return a_filename < b_filename;
+                }
+                return a.document_id > b.document_id;
+            });
+
+        for (std::size_t i = offset; i < hits.size() && mapped_vec_.size() < limit; ++i)
+        {
+            mapped_vec_.push_back(hits[i]);
+        }
+
+        return EXIT_SUCCESS;
+    }
+
     int get_pages_by_document_id(int document_id) override
     {
         clear_state();
@@ -1042,6 +1136,32 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
         std::size_t offset = parse_size_param(req.url_params.get("offset"), 0, 1000000);
 
         int result = repo.list_all(limit, offset);
+        if (result != EXIT_SUCCESS)
+        {
+            return crow::response(500, repo.error());
+        }
+
+        auto docs = repo.get_mapped_entry_vector();
+        return crow::response(200, MySqlCourtDocumentsRepository::to_crow_json(docs));
+    });
+
+    // GET /courtdocuments/by-filename?q=...&limit=&offset=
+    CROW_ROUTE(app, "/courtdocuments/by-filename").methods(crow::HTTPMethod::GET)
+    ([&pool_ptr](const crow::request& req)
+    {
+        mysqlpp::ScopedConnection sc(pool_ptr, true);
+        CourtDocumentsRepositoryImpl repo(sc);
+
+        const char* q = req.url_params.get("q");
+        if (!q || std::string(q).empty())
+        {
+            return crow::response(400, "Missing q parameter");
+        }
+
+        std::size_t limit  = parse_size_param(req.url_params.get("limit"), 20, 50);
+        std::size_t offset = parse_size_param(req.url_params.get("offset"), 0, 10000);
+
+        int result = repo.search_by_filename(q, limit, offset);
         if (result != EXIT_SUCCESS)
         {
             return crow::response(500, repo.error());
