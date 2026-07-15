@@ -32,7 +32,7 @@ type ResultItem = CourtDocument & {
   snippet?: string;
 };
 
-type ResultMode = "all" | "search";
+type ResultMode = "all" | "search" | "filename";
 type DetailTab = "pages" | "fullText" | "metadata";
 
 type RuntimeConfig = {
@@ -64,6 +64,30 @@ const buildQueryString = (params: Record<string, string | number>) => {
 };
 
 const normalizeEndpoint = (endpoint: string) => endpoint.trim().replace(/\/$/, "");
+
+const getBrowserReachableApiUrl = (endpoint: string) => {
+  const normalized = normalizeEndpoint(endpoint);
+
+  if (!normalized || typeof window === "undefined") {
+    return normalized;
+  }
+
+  try {
+    const url = new URL(normalized);
+    const pageHostname = window.location.hostname;
+    const isLocalApiHost = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1";
+    const isLocalPageHost = pageHostname === "localhost" || pageHostname === "127.0.0.1" || pageHostname === "::1";
+
+    if (isLocalApiHost && !isLocalPageHost) {
+      url.hostname = pageHostname;
+      return normalizeEndpoint(url.toString());
+    }
+  } catch (_error) {
+    return normalized;
+  }
+
+  return normalized;
+};
 
 const parsePositiveInt = (value: string, fallback: number) => {
   const parsed = Number.parseInt(value, 10);
@@ -167,8 +191,8 @@ const SearchEngineQueryClient: React.FC = () => {
     message: DEFAULT_SEARCH_ENGINE_API_URL ? "Loading recent documents." : "Loading API configuration.",
   });
   const [detailStatus, setDetailStatus] = useState<Status>({ type: "idle", message: "Select a document to read." });
-  const [apiBaseUrl, setApiBaseUrl] = useState(DEFAULT_SEARCH_ENGINE_API_URL);
-  const [configLoaded, setConfigLoaded] = useState(Boolean(DEFAULT_SEARCH_ENGINE_API_URL));
+  const [apiBaseUrl, setApiBaseUrl] = useState(() => getBrowserReachableApiUrl(DEFAULT_SEARCH_ENGINE_API_URL));
+  const [configLoaded, setConfigLoaded] = useState(() => Boolean(getBrowserReachableApiUrl(DEFAULT_SEARCH_ENGINE_API_URL)));
 
   const queryTerms = useMemo(() => getQueryTerms(query), [query]);
   const activePage = useMemo(
@@ -221,8 +245,11 @@ const SearchEngineQueryClient: React.FC = () => {
   const loadResults = async (nextMode: ResultMode, nextOffset: number) => {
     const normalizedQuery = query.trim();
 
-    if (nextMode === "search" && !normalizedQuery) {
-      setStatus({ type: "error", message: "Enter a search term first." });
+    if ((nextMode === "search" || nextMode === "filename") && !normalizedQuery) {
+      setStatus({
+        type: "error",
+        message: nextMode === "filename" ? "Enter a filename first." : "Enter a search term first.",
+      });
       return;
     }
 
@@ -230,14 +257,16 @@ const SearchEngineQueryClient: React.FC = () => {
     setOffset(String(nextOffset));
     setStatus({
       type: "loading",
-      message: nextMode === "search" ? "Searching documents." : "Loading documents.",
+      message: nextMode === "search" ? "Searching document text." : nextMode === "filename" ? "Searching filenames." : "Loading documents.",
     });
 
     try {
       const path =
         nextMode === "search"
-          ? `/courtdocuments/search${buildQueryString({ q: normalizedQuery, limit: resultLimit, offset: nextOffset })}`
-          : `/courtdocuments${buildQueryString({ limit: resultLimit, offset: nextOffset })}`;
+          ? "/courtdocuments/search" + buildQueryString({ q: normalizedQuery, limit: resultLimit, offset: nextOffset })
+          : nextMode === "filename"
+            ? "/courtdocuments/by-filename" + buildQueryString({ q: normalizedQuery, limit: resultLimit, offset: nextOffset })
+            : "/courtdocuments" + buildQueryString({ limit: resultLimit, offset: nextOffset });
 
       const data = await requestJson<Array<SearchHit | CourtDocument>>(path);
       const nextResults = data as ResultItem[];
@@ -290,7 +319,7 @@ const SearchEngineQueryClient: React.FC = () => {
       try {
         const response = await fetch("/api/runtime-config", { cache: "no-store" });
         const data = (await response.json()) as RuntimeConfig;
-        const nextApiBaseUrl = normalizeEndpoint(data.restApiUrl || "");
+        const nextApiBaseUrl = getBrowserReachableApiUrl(data.restApiUrl || "");
 
         if (!response.ok || !nextApiBaseUrl) {
           throw new Error("Missing NEXT_PUBLIC_REST_API_URL.");
@@ -382,6 +411,13 @@ const SearchEngineQueryClient: React.FC = () => {
                   className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"
                 >
                   Search
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void loadResults("filename", 0)}
+                  className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-500 dark:border-slate-700 dark:text-slate-200"
+                >
+                  Filename
                 </button>
                 <button
                   type="button"
