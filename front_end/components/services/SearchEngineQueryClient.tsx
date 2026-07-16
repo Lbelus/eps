@@ -40,6 +40,7 @@ type RuntimeConfig = {
 };
 
 const DEFAULT_SEARCH_ENGINE_API_URL = process.env.NEXT_PUBLIC_REST_API_URL?.replace(/[/]$/, "") || "";
+const MAX_DOCUMENT_LIMIT = 100;
 
 const SOURCE_LABELS: Record<string, string> = {
   cl: "CourtListener",
@@ -89,9 +90,10 @@ const getBrowserReachableApiUrl = (endpoint: string) => {
   return normalized;
 };
 
-const parsePositiveInt = (value: string, fallback: number) => {
+const parsePositiveInt = (value: string, fallback: number, max?: number) => {
   const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  const result = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return typeof max === "number" ? Math.min(result, max) : result;
 };
 
 const parseNonNegativeInt = (value: string, fallback: number) => {
@@ -200,7 +202,7 @@ const SearchEngineQueryClient: React.FC = () => {
     [activePageNumber, pages]
   );
   const cleanedEndpoint = useMemo(() => normalizeEndpoint(apiBaseUrl), [apiBaseUrl]);
-  const resultLimit = useMemo(() => parsePositiveInt(limit, 20), [limit]);
+  const resultLimit = useMemo(() => parsePositiveInt(limit, 20, MAX_DOCUMENT_LIMIT), [limit]);
   const resultOffset = useMemo(() => parseNonNegativeInt(offset, 0), [offset]);
 
   const requestJson = async <T,>(path: string): Promise<T> => {
@@ -387,6 +389,7 @@ const SearchEngineQueryClient: React.FC = () => {
                   <input
                     type="number"
                     min={1}
+                    max={MAX_DOCUMENT_LIMIT}
                     value={limit}
                     onChange={(event) => setLimit(event.target.value)}
                     className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
