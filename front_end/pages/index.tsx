@@ -25,6 +25,12 @@ export default function Home() {
           </Link>
           <div className="flex items-center gap-5 text-slate-700">
             <Link
+              href="/changelog"
+              className="text-sm font-medium text-slate-700 transition hover:text-slate-950 dark:text-slate-200 dark:hover:text-white"
+            >
+              Changelog
+            </Link>
+            <Link
               href="/contact"
               className="text-sm font-medium text-slate-700 transition hover:text-slate-950 dark:text-slate-200 dark:hover:text-white"
             >
@@ -65,6 +71,13 @@ export default function Home() {
               >
                 <h3 className="text-lg font-semibold text-slate-900">Matrix chat (placeholder)</h3>
                 <p className="text-sm text-slate-600">Temporary entry point for the future Matrix messaging service.</p>
+              </Link>
+              <Link
+                href="/changelog"
+                className="block rounded-lg border border-slate-200 bg-white/80 px-4 py-3 text-slate-700 shadow-sm transition hover:shadow-md dark:border-slate-700 dark:bg-slate-900 sm:col-span-2"
+              >
+                <h3 className="text-lg font-semibold text-slate-900">Project changelog</h3>
+                <p className="text-sm text-slate-600">Track recent EPS improvements and public-facing project updates.</p>
               </Link>
             </div>
           </div>
