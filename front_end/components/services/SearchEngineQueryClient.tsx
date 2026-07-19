@@ -190,6 +190,8 @@ const SearchEngineQueryClient: React.FC = () => {
   const [offset, setOffset] = useState("0");
   const [mode, setMode] = useState<ResultMode>("all");
   const [sourceFilters, setSourceFilters] = useState<SourceFilter[]>([]);
+  const [minPages, setMinPages] = useState("0");
+  const [maxPages, setMaxPages] = useState("");
   const [results, setResults] = useState<ResultItem[]>([]);
   const [selectedDocument, setSelectedDocument] = useState<CourtDocument | null>(null);
   const [pages, setPages] = useState<CourtPage[]>([]);
@@ -212,6 +214,11 @@ const SearchEngineQueryClient: React.FC = () => {
   const cleanedEndpoint = useMemo(() => normalizeEndpoint(apiBaseUrl), [apiBaseUrl]);
   const resultLimit = useMemo(() => parsePositiveInt(limit, 20, MAX_DOCUMENT_LIMIT), [limit]);
   const resultOffset = useMemo(() => parseNonNegativeInt(offset, 0), [offset]);
+  const minPageFilter = useMemo(() => parseNonNegativeInt(minPages, 0), [minPages]);
+  const maxPageFilter = useMemo(() => {
+    const trimmed = maxPages.trim();
+    return trimmed === "" ? "" : parseNonNegativeInt(trimmed, 0);
+  }, [maxPages]);
   const sourceParam = useMemo(() => {
     if (sourceFilters.length === 0 || sourceFilters.length === SOURCE_FILTER_OPTIONS.length) {
       return "";
@@ -264,6 +271,12 @@ const SearchEngineQueryClient: React.FC = () => {
 
   const loadResults = async (nextMode: ResultMode, nextOffset: number) => {
     const normalizedQuery = query.trim();
+    const pageMaxParam = maxPageFilter === "" ? "" : maxPageFilter;
+
+    if (typeof maxPageFilter === "number" && maxPageFilter !== 0 && minPageFilter > maxPageFilter) {
+      setStatus({ type: "error", message: "Minimum pages cannot be greater than maximum pages." });
+      return;
+    }
     if ((nextMode === "search" || nextMode === "filename") && !normalizedQuery) {
       setStatus({
         type: "error",
@@ -282,10 +295,10 @@ const SearchEngineQueryClient: React.FC = () => {
     try {
       const path =
         nextMode === "search"
-          ? "/courtdocuments/search" + buildQueryString({ q: normalizedQuery, source: sourceParam, limit: resultLimit, offset: nextOffset })
+          ? "/courtdocuments/search" + buildQueryString({ q: normalizedQuery, source: sourceParam, page_min: minPageFilter, page_max: pageMaxParam, limit: resultLimit, offset: nextOffset })
           : nextMode === "filename"
-            ? "/courtdocuments/by-filename" + buildQueryString({ q: normalizedQuery, source: sourceParam, limit: resultLimit, offset: nextOffset })
-            : "/courtdocuments" + buildQueryString({ source: sourceParam, limit: resultLimit, offset: nextOffset });
+            ? "/courtdocuments/by-filename" + buildQueryString({ q: normalizedQuery, source: sourceParam, page_min: minPageFilter, page_max: pageMaxParam, limit: resultLimit, offset: nextOffset })
+            : "/courtdocuments" + buildQueryString({ source: sourceParam, page_min: minPageFilter, page_max: pageMaxParam, limit: resultLimit, offset: nextOffset });
 
       const data = await requestJson<Array<SearchHit | CourtDocument>>(path);
       const nextResults = data as ResultItem[];
@@ -439,6 +452,33 @@ const SearchEngineQueryClient: React.FC = () => {
                       </button>
                     );
                   })}
+                </div>
+              </fieldset>
+
+              <fieldset className="space-y-2">
+                <legend className="text-sm font-medium text-slate-700 dark:text-slate-200">Page count</legend>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
+                    Min
+                    <input
+                      type="number"
+                      min={0}
+                      value={minPages}
+                      onChange={(event) => setMinPages(event.target.value)}
+                      className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
+                    Max
+                    <input
+                      type="number"
+                      min={0}
+                      value={maxPages}
+                      onChange={(event) => setMaxPages(event.target.value)}
+                      placeholder="All"
+                      className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                    />
+                  </label>
                 </div>
               </fieldset>
 
