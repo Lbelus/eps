@@ -11,6 +11,18 @@ type ChangelogEntry = {
 
 const entries: ChangelogEntry[] = [
   {
+    date: "2026-07-19",
+    title: "Document size filtering",
+    description:
+      "The document search UI and REST API now support page-count range filters, letting visitors narrow results from zero pages up to any maximum document size.",
+  },
+  {
+    date: "2026-07-19",
+    title: "Multi-source document filtering",
+    description:
+      "Search results can now be filtered across one or more document sources, including DOJ, CourtListener, and DocumentCloud records, without leaving the document viewer.",
+  },
+  {
     date: "2026-07-17",
     title: "Detailed project changelog",
     description:
