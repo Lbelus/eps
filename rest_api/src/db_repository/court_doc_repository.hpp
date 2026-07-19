@@ -148,10 +148,10 @@ struct ICourtDocumentsRepository
     virtual ~ICourtDocumentsRepository() = default;
 
     virtual int get_by_id(int id) = 0;
-    virtual int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::string& source_filter = "") = 0;
+    virtual int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}) = 0;
     virtual int get_pages_by_document_id(int document_id) = 0;
-    virtual int search_fulltext(const std::string& query, std::size_t limit = 20, std::size_t offset = 0, const std::string& source_filter = "") = 0;
-    virtual int search_by_filename(const std::string& query, std::size_t limit = 20, std::size_t offset = 0, const std::string& source_filter = "") = 0;
+    virtual int search_fulltext(const std::string& query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}) = 0;
+    virtual int search_by_filename(const std::string& query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}) = 0;
     virtual const char* error() = 0;
     virtual CourtDocument get_mapped_entry() = 0;
     virtual std::vector<CourtDocument> get_mapped_entry_vector() = 0;
@@ -210,12 +210,12 @@ public:
         return EXIT_SUCCESS;
     }
 
-    int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::string& source_filter = "") override
+    int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}) override
     {
         clear_state();
 
         mysqlpp::StoreQueryResult result;
-        if (source_filter.empty())
+        if (source_filters.empty())
         {
             mysqlpp::Query query = conn().query(
                 "SELECT document_id, filename, source, page_count, created_at "
@@ -239,13 +239,15 @@ public:
             mysqlpp::Query query = conn().query(
                 "SELECT document_id, filename, source, page_count, created_at "
                 "FROM documents "
-                "WHERE source = %0q "
+                "WHERE source IN (%0q, %1q, %2q) "
                 "ORDER BY document_id DESC "
-                "LIMIT %1 OFFSET %2"
+                "LIMIT %3 OFFSET %4"
             );
             query.parse();
             result = query.store(
-                source_filter,
+                source_at(source_filters, 0),
+                source_at(source_filters, 1),
+                source_at(source_filters, 2),
                 mysqlpp::sql_int(limit),
                 mysqlpp::sql_int(offset)
             );
@@ -265,7 +267,7 @@ public:
         return EXIT_SUCCESS;
     }
 
-    int search_by_filename(const std::string& user_query, std::size_t limit = 20, std::size_t offset = 0, const std::string& source_filter = "") override
+    int search_by_filename(const std::string& user_query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}) override
     {
         clear_state();
 
@@ -277,7 +279,7 @@ public:
 
         const std::string pattern = "%" + user_query + "%";
         mysqlpp::StoreQueryResult result;
-        if (source_filter.empty())
+        if (source_filters.empty())
         {
             mysqlpp::Query query = conn().query(
                 "SELECT document_id, filename, source, page_count, created_at "
@@ -304,14 +306,16 @@ public:
             mysqlpp::Query query = conn().query(
                 "SELECT document_id, filename, source, page_count, created_at "
                 "FROM documents "
-                "WHERE filename LIKE %0q AND source = %1q "
-                "ORDER BY CASE WHEN filename = %2q THEN 0 ELSE 1 END, filename ASC, document_id DESC "
-                "LIMIT %3 OFFSET %4"
+                "WHERE filename LIKE %0q AND source IN (%1q, %2q, %3q) "
+                "ORDER BY CASE WHEN filename = %4q THEN 0 ELSE 1 END, filename ASC, document_id DESC "
+                "LIMIT %5 OFFSET %6"
             );
             query.parse();
             result = query.store(
                 pattern,
-                source_filter,
+                source_at(source_filters, 0),
+                source_at(source_filters, 1),
+                source_at(source_filters, 2),
                 user_query,
                 mysqlpp::sql_int(limit),
                 mysqlpp::sql_int(offset)
@@ -360,7 +364,7 @@ public:
         return EXIT_SUCCESS;
     }
 
-    int search_fulltext(const std::string& user_query, std::size_t limit = 20, std::size_t offset = 0, const std::string& source_filter = "") override
+    int search_fulltext(const std::string& user_query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}) override
     {
         clear_state();
 
@@ -379,7 +383,7 @@ public:
         const std::string anchor = anchor_terms.empty() ? user_query : anchor_terms.front();
 
         mysqlpp::StoreQueryResult result;
-        if (source_filter.empty())
+        if (source_filters.empty())
         {
             mysqlpp::Query query = conn().query(
                 "SELECT "
@@ -425,16 +429,18 @@ public:
                 "            GREATEST(CAST(LOCATE(%1q, full_text) AS SIGNED) - 4000, 1), "
                 "            8000) AS excerpt "
                 "FROM documents "
-                "WHERE MATCH(full_text) AGAINST (%2q IN NATURAL LANGUAGE MODE) AND source = %3q "
+                "WHERE MATCH(full_text) AGAINST (%2q IN NATURAL LANGUAGE MODE) AND source IN (%3q, %4q, %5q) "
                 "ORDER BY score DESC, document_id DESC "
-                "LIMIT %4 OFFSET %5"
+                "LIMIT %6 OFFSET %7"
             );
             query.parse();
             result = query.store(
                 user_query,
                 anchor,
                 user_query,
-                source_filter,
+                source_at(source_filters, 0),
+                source_at(source_filters, 1),
+                source_at(source_filters, 2),
                 mysqlpp::sql_int(limit),
                 mysqlpp::sql_int(offset)
             );
@@ -615,6 +621,11 @@ private:
         page.page_number = 0;
         page.page_text = "";
         return page;
+    }
+
+    static std::string source_at(const std::vector<std::string>& source_filters, std::size_t index)
+    {
+        return index < source_filters.size() ? source_filters[index] : "__missing_source__";
     }
 
     static std::string safe_string(const mysqlpp::String& s)
@@ -811,7 +822,7 @@ public:
         return EXIT_SUCCESS;
     }
 
-    int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::string& source_filter = "") override
+    int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}) override
     {
         clear_state();
 
@@ -820,7 +831,7 @@ public:
 
         for (const auto& kv : documents_by_id_)
         {
-            if (!source_filter.empty() && std::string(kv.second.source) != source_filter)
+            if (!source_matches(source_filters, std::string(kv.second.source)))
             {
                 continue;
             }
@@ -849,7 +860,7 @@ public:
     int search_by_filename(const std::string& query,
                            std::size_t limit = 20,
                            std::size_t offset = 0,
-                           const std::string& source_filter = "") override
+                           const std::vector<std::string>& source_filters = {}) override
     {
         clear_state();
 
@@ -865,7 +876,7 @@ public:
         for (const auto& kv : documents_by_id_)
         {
             const CourtDocument& doc = kv.second;
-            if (!source_filter.empty() && std::string(doc.source) != source_filter)
+            if (!source_matches(source_filters, std::string(doc.source)))
             {
                 continue;
             }
@@ -925,7 +936,7 @@ public:
     int search_fulltext(const std::string& query,
                         std::size_t limit = 20,
                         std::size_t offset = 0,
-                        const std::string& source_filter = "") override
+                        const std::vector<std::string>& source_filters = {}) override
     {
         clear_state();
 
@@ -946,7 +957,7 @@ public:
         for (const auto& kv : documents_by_id_)
         {
             const CourtDocument& doc = kv.second;
-            if (!source_filter.empty() && std::string(doc.source) != source_filter)
+            if (!source_matches(source_filters, std::string(doc.source)))
             {
                 continue;
             }
@@ -1047,6 +1058,12 @@ private:
         doc.full_text = "";
         doc.created_at = mysqlpp::DateTime();
         return doc;
+    }
+
+    static bool source_matches(const std::vector<std::string>& source_filters, const std::string& source)
+    {
+        return source_filters.empty() ||
+            std::find(source_filters.begin(), source_filters.end(), source) != source_filters.end();
     }
 
     static std::string to_lower_copy(const std::string& input)
@@ -1202,27 +1219,46 @@ inline std::size_t parse_size_param(const char* raw, std::size_t fallback, std::
     return std::min<std::size_t>(parsed, max_value);
 }
 
-inline bool parse_source_param(const char* raw, std::string& source_filter)
+inline bool parse_source_param(const char* raw, std::vector<std::string>& source_filters)
 {
-    source_filter.clear();
+    source_filters.clear();
     if (!raw || *raw == '\0')
     {
         return true;
     }
 
-    const std::string value(raw);
-    if (value == "all")
+    std::stringstream tokens(raw);
+    std::string token;
+    while (std::getline(tokens, token, ','))
     {
-        return true;
+        token.erase(std::remove_if(token.begin(), token.end(),
+            [](unsigned char c) { return std::isspace(c); }), token.end());
+
+        if (token.empty())
+        {
+            return false;
+        }
+        if (token == "all")
+        {
+            source_filters.clear();
+            return true;
+        }
+        if (token != "doj" && token != "cl" && token != "dc")
+        {
+            return false;
+        }
+        if (std::find(source_filters.begin(), source_filters.end(), token) == source_filters.end())
+        {
+            source_filters.push_back(token);
+        }
     }
 
-    if (value == "doj" || value == "cl" || value == "dc")
+    if (source_filters.size() == 3)
     {
-        source_filter = value;
-        return true;
+        source_filters.clear();
     }
 
-    return false;
+    return true;
 }
 
 template <typename... Middlewares>
@@ -1254,13 +1290,13 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
 
         std::size_t limit  = parse_size_param(req.url_params.get("limit"), 100, 100);
         std::size_t offset = parse_size_param(req.url_params.get("offset"), 0, 1000000);
-        std::string source_filter;
-        if (!parse_source_param(req.url_params.get("source"), source_filter))
+        std::vector<std::string> source_filters;
+        if (!parse_source_param(req.url_params.get("source"), source_filters))
         {
             return crow::response(400, "Invalid source parameter");
         }
 
-        int result = repo.list_all(limit, offset, source_filter);
+        int result = repo.list_all(limit, offset, source_filters);
         if (result != EXIT_SUCCESS)
         {
             return crow::response(500, repo.error());
@@ -1285,13 +1321,13 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
 
         std::size_t limit  = parse_size_param(req.url_params.get("limit"), 20, 50);
         std::size_t offset = parse_size_param(req.url_params.get("offset"), 0, 10000);
-        std::string source_filter;
-        if (!parse_source_param(req.url_params.get("source"), source_filter))
+        std::vector<std::string> source_filters;
+        if (!parse_source_param(req.url_params.get("source"), source_filters))
         {
             return crow::response(400, "Invalid source parameter");
         }
 
-        int result = repo.search_by_filename(q, limit, offset, source_filter);
+        int result = repo.search_by_filename(q, limit, offset, source_filters);
         if (result != EXIT_SUCCESS)
         {
             return crow::response(500, repo.error());
@@ -1333,13 +1369,13 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
 
         std::size_t limit  = parse_size_param(req.url_params.get("limit"), 20, 50);
         std::size_t offset = parse_size_param(req.url_params.get("offset"), 0, 10000);
-        std::string source_filter;
-        if (!parse_source_param(req.url_params.get("source"), source_filter))
+        std::vector<std::string> source_filters;
+        if (!parse_source_param(req.url_params.get("source"), source_filters))
         {
             return crow::response(400, "Invalid source parameter");
         }
 
-        int result = repo.search_fulltext(q, limit, offset, source_filter);
+        int result = repo.search_fulltext(q, limit, offset, source_filters);
         if (result != EXIT_SUCCESS)
         {
             return crow::response(500, repo.error());
