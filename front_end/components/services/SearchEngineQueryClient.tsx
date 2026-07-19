@@ -33,6 +33,7 @@ type ResultItem = CourtDocument & {
 };
 
 type ResultMode = "all" | "search" | "filename";
+type SourceFilter = "doj" | "cl" | "dc";
 type DetailTab = "pages" | "fullText" | "metadata";
 
 type RuntimeConfig = {
@@ -47,6 +48,12 @@ const SOURCE_LABELS: Record<string, string> = {
   dc: "DocumentCloud",
   doj: "DOJ",
 };
+
+const SOURCE_FILTER_OPTIONS: Array<{ value: SourceFilter; label: string }> = [
+  { value: "doj", label: "DOJ" },
+  { value: "cl", label: "CourtListener" },
+  { value: "dc", label: "DocumentCloud" },
+];
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -182,6 +189,7 @@ const SearchEngineQueryClient: React.FC = () => {
   const [limit, setLimit] = useState("20");
   const [offset, setOffset] = useState("0");
   const [mode, setMode] = useState<ResultMode>("all");
+  const [sourceFilters, setSourceFilters] = useState<SourceFilter[]>([]);
   const [results, setResults] = useState<ResultItem[]>([]);
   const [selectedDocument, setSelectedDocument] = useState<CourtDocument | null>(null);
   const [pages, setPages] = useState<CourtPage[]>([]);
@@ -204,6 +212,16 @@ const SearchEngineQueryClient: React.FC = () => {
   const cleanedEndpoint = useMemo(() => normalizeEndpoint(apiBaseUrl), [apiBaseUrl]);
   const resultLimit = useMemo(() => parsePositiveInt(limit, 20, MAX_DOCUMENT_LIMIT), [limit]);
   const resultOffset = useMemo(() => parseNonNegativeInt(offset, 0), [offset]);
+  const sourceParam = useMemo(() => {
+    if (sourceFilters.length === 0 || sourceFilters.length === SOURCE_FILTER_OPTIONS.length) {
+      return "";
+    }
+
+    return SOURCE_FILTER_OPTIONS
+      .map((option) => option.value)
+      .filter((source) => sourceFilters.includes(source))
+      .join(",");
+  }, [sourceFilters]);
 
   const requestJson = async <T,>(path: string): Promise<T> => {
     if (!cleanedEndpoint) {
@@ -246,7 +264,6 @@ const SearchEngineQueryClient: React.FC = () => {
 
   const loadResults = async (nextMode: ResultMode, nextOffset: number) => {
     const normalizedQuery = query.trim();
-
     if ((nextMode === "search" || nextMode === "filename") && !normalizedQuery) {
       setStatus({
         type: "error",
@@ -265,10 +282,10 @@ const SearchEngineQueryClient: React.FC = () => {
     try {
       const path =
         nextMode === "search"
-          ? "/courtdocuments/search" + buildQueryString({ q: normalizedQuery, limit: resultLimit, offset: nextOffset })
+          ? "/courtdocuments/search" + buildQueryString({ q: normalizedQuery, source: sourceParam, limit: resultLimit, offset: nextOffset })
           : nextMode === "filename"
-            ? "/courtdocuments/by-filename" + buildQueryString({ q: normalizedQuery, limit: resultLimit, offset: nextOffset })
-            : "/courtdocuments" + buildQueryString({ limit: resultLimit, offset: nextOffset });
+            ? "/courtdocuments/by-filename" + buildQueryString({ q: normalizedQuery, source: sourceParam, limit: resultLimit, offset: nextOffset })
+            : "/courtdocuments" + buildQueryString({ source: sourceParam, limit: resultLimit, offset: nextOffset });
 
       const data = await requestJson<Array<SearchHit | CourtDocument>>(path);
       const nextResults = data as ResultItem[];
@@ -306,6 +323,12 @@ const SearchEngineQueryClient: React.FC = () => {
     if (exists) {
       setActivePageNumber(requestedPage);
     }
+  };
+
+  const toggleSourceFilter = (source: SourceFilter) => {
+    setSourceFilters((current) =>
+      current.includes(source) ? current.filter((item) => item !== source) : [...current, source]
+    );
   };
 
   useEffect(() => {
@@ -382,6 +405,42 @@ const SearchEngineQueryClient: React.FC = () => {
                   className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                 />
               </label>
+
+              <fieldset className="space-y-2">
+                <legend className="text-sm font-medium text-slate-700 dark:text-slate-200">Sources</legend>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    aria-pressed={sourceFilters.length === 0}
+                    onClick={() => setSourceFilters([])}
+                    className={`rounded-md border px-3 py-2 text-left text-sm font-medium transition ${
+                      sourceFilters.length === 0
+                        ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950"
+                        : "border-slate-300 text-slate-700 hover:border-slate-500 dark:border-slate-700 dark:text-slate-200"
+                    }`}
+                  >
+                    All sources
+                  </button>
+                  {SOURCE_FILTER_OPTIONS.map((option) => {
+                    const selected = sourceFilters.includes(option.value);
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => toggleSourceFilter(option.value)}
+                        className={`rounded-md border px-3 py-2 text-left text-sm font-medium transition ${
+                          selected
+                            ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950"
+                            : "border-slate-300 text-slate-700 hover:border-slate-500 dark:border-slate-700 dark:text-slate-200"
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </fieldset>
 
               <div className="grid grid-cols-2 gap-3">
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
