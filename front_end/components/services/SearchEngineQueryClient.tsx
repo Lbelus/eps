@@ -33,6 +33,7 @@ type ResultItem = CourtDocument & {
 };
 
 type ResultMode = "all" | "search" | "filename";
+type SourceFilter = "all" | "doj" | "cl" | "dc";
 type DetailTab = "pages" | "fullText" | "metadata";
 
 type RuntimeConfig = {
@@ -47,6 +48,13 @@ const SOURCE_LABELS: Record<string, string> = {
   dc: "DocumentCloud",
   doj: "DOJ",
 };
+
+const SOURCE_FILTER_OPTIONS: Array<{ value: SourceFilter; label: string }> = [
+  { value: "all", label: "All sources" },
+  { value: "doj", label: "DOJ" },
+  { value: "cl", label: "CourtListener" },
+  { value: "dc", label: "DocumentCloud" },
+];
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -182,6 +190,7 @@ const SearchEngineQueryClient: React.FC = () => {
   const [limit, setLimit] = useState("20");
   const [offset, setOffset] = useState("0");
   const [mode, setMode] = useState<ResultMode>("all");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [results, setResults] = useState<ResultItem[]>([]);
   const [selectedDocument, setSelectedDocument] = useState<CourtDocument | null>(null);
   const [pages, setPages] = useState<CourtPage[]>([]);
@@ -246,6 +255,7 @@ const SearchEngineQueryClient: React.FC = () => {
 
   const loadResults = async (nextMode: ResultMode, nextOffset: number) => {
     const normalizedQuery = query.trim();
+    const sourceParam = sourceFilter === "all" ? "" : sourceFilter;
 
     if ((nextMode === "search" || nextMode === "filename") && !normalizedQuery) {
       setStatus({
@@ -265,10 +275,10 @@ const SearchEngineQueryClient: React.FC = () => {
     try {
       const path =
         nextMode === "search"
-          ? "/courtdocuments/search" + buildQueryString({ q: normalizedQuery, limit: resultLimit, offset: nextOffset })
+          ? "/courtdocuments/search" + buildQueryString({ q: normalizedQuery, source: sourceParam, limit: resultLimit, offset: nextOffset })
           : nextMode === "filename"
-            ? "/courtdocuments/by-filename" + buildQueryString({ q: normalizedQuery, limit: resultLimit, offset: nextOffset })
-            : "/courtdocuments" + buildQueryString({ limit: resultLimit, offset: nextOffset });
+            ? "/courtdocuments/by-filename" + buildQueryString({ q: normalizedQuery, source: sourceParam, limit: resultLimit, offset: nextOffset })
+            : "/courtdocuments" + buildQueryString({ source: sourceParam, limit: resultLimit, offset: nextOffset });
 
       const data = await requestJson<Array<SearchHit | CourtDocument>>(path);
       const nextResults = data as ResultItem[];
@@ -381,6 +391,21 @@ const SearchEngineQueryClient: React.FC = () => {
                   placeholder="Epstein, flight logs, subpoena..."
                   className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                 />
+              </label>
+
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
+                Source
+                <select
+                  value={sourceFilter}
+                  onChange={(event) => setSourceFilter(event.target.value as SourceFilter)}
+                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                >
+                  {SOURCE_FILTER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               <div className="grid grid-cols-2 gap-3">

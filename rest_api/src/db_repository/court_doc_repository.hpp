@@ -148,10 +148,10 @@ struct ICourtDocumentsRepository
     virtual ~ICourtDocumentsRepository() = default;
 
     virtual int get_by_id(int id) = 0;
-    virtual int list_all(std::size_t limit = 100, std::size_t offset = 0) = 0;
+    virtual int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::string& source_filter = "") = 0;
     virtual int get_pages_by_document_id(int document_id) = 0;
-    virtual int search_fulltext(const std::string& query, std::size_t limit = 20, std::size_t offset = 0) = 0;
-    virtual int search_by_filename(const std::string& query, std::size_t limit = 20, std::size_t offset = 0) = 0;
+    virtual int search_fulltext(const std::string& query, std::size_t limit = 20, std::size_t offset = 0, const std::string& source_filter = "") = 0;
+    virtual int search_by_filename(const std::string& query, std::size_t limit = 20, std::size_t offset = 0, const std::string& source_filter = "") = 0;
     virtual const char* error() = 0;
     virtual CourtDocument get_mapped_entry() = 0;
     virtual std::vector<CourtDocument> get_mapped_entry_vector() = 0;
@@ -210,27 +210,50 @@ public:
         return EXIT_SUCCESS;
     }
 
-    int list_all(std::size_t limit = 100, std::size_t offset = 0) override
+    int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::string& source_filter = "") override
     {
         clear_state();
 
-        mysqlpp::Query query = conn().query(
-            "SELECT document_id, filename, source, page_count, created_at "
-            "FROM documents "
-            "ORDER BY document_id DESC "
-            "LIMIT %0 OFFSET %1"
-        );
-        query.parse();
-
-        mysqlpp::StoreQueryResult result = query.store(
-            mysqlpp::sql_int(limit),
-            mysqlpp::sql_int(offset)
-        );
-
-        if (!result)
+        mysqlpp::StoreQueryResult result;
+        if (source_filter.empty())
         {
-            error_msg_ = query.error();
-            return EXIT_FAILURE;
+            mysqlpp::Query query = conn().query(
+                "SELECT document_id, filename, source, page_count, created_at "
+                "FROM documents "
+                "ORDER BY document_id DESC "
+                "LIMIT %0 OFFSET %1"
+            );
+            query.parse();
+            result = query.store(
+                mysqlpp::sql_int(limit),
+                mysqlpp::sql_int(offset)
+            );
+            if (!result)
+            {
+                error_msg_ = query.error();
+                return EXIT_FAILURE;
+            }
+        }
+        else
+        {
+            mysqlpp::Query query = conn().query(
+                "SELECT document_id, filename, source, page_count, created_at "
+                "FROM documents "
+                "WHERE source = %0q "
+                "ORDER BY document_id DESC "
+                "LIMIT %1 OFFSET %2"
+            );
+            query.parse();
+            result = query.store(
+                source_filter,
+                mysqlpp::sql_int(limit),
+                mysqlpp::sql_int(offset)
+            );
+            if (!result)
+            {
+                error_msg_ = query.error();
+                return EXIT_FAILURE;
+            }
         }
 
         mapped_entry_vec_.reserve(result.num_rows());
@@ -242,7 +265,7 @@ public:
         return EXIT_SUCCESS;
     }
 
-    int search_by_filename(const std::string& user_query, std::size_t limit = 20, std::size_t offset = 0) override
+    int search_by_filename(const std::string& user_query, std::size_t limit = 20, std::size_t offset = 0, const std::string& source_filter = "") override
     {
         clear_state();
 
@@ -252,27 +275,52 @@ public:
             return EXIT_FAILURE;
         }
 
-        mysqlpp::Query query = conn().query(
-            "SELECT document_id, filename, source, page_count, created_at "
-            "FROM documents "
-            "WHERE filename LIKE %0q "
-            "ORDER BY CASE WHEN filename = %1q THEN 0 ELSE 1 END, filename ASC, document_id DESC "
-            "LIMIT %2 OFFSET %3"
-        );
-        query.parse();
-
         const std::string pattern = "%" + user_query + "%";
-        mysqlpp::StoreQueryResult result = query.store(
-            pattern,
-            user_query,
-            mysqlpp::sql_int(limit),
-            mysqlpp::sql_int(offset)
-        );
-
-        if (!result)
+        mysqlpp::StoreQueryResult result;
+        if (source_filter.empty())
         {
-            error_msg_ = query.error();
-            return EXIT_FAILURE;
+            mysqlpp::Query query = conn().query(
+                "SELECT document_id, filename, source, page_count, created_at "
+                "FROM documents "
+                "WHERE filename LIKE %0q "
+                "ORDER BY CASE WHEN filename = %1q THEN 0 ELSE 1 END, filename ASC, document_id DESC "
+                "LIMIT %2 OFFSET %3"
+            );
+            query.parse();
+            result = query.store(
+                pattern,
+                user_query,
+                mysqlpp::sql_int(limit),
+                mysqlpp::sql_int(offset)
+            );
+            if (!result)
+            {
+                error_msg_ = query.error();
+                return EXIT_FAILURE;
+            }
+        }
+        else
+        {
+            mysqlpp::Query query = conn().query(
+                "SELECT document_id, filename, source, page_count, created_at "
+                "FROM documents "
+                "WHERE filename LIKE %0q AND source = %1q "
+                "ORDER BY CASE WHEN filename = %2q THEN 0 ELSE 1 END, filename ASC, document_id DESC "
+                "LIMIT %3 OFFSET %4"
+            );
+            query.parse();
+            result = query.store(
+                pattern,
+                source_filter,
+                user_query,
+                mysqlpp::sql_int(limit),
+                mysqlpp::sql_int(offset)
+            );
+            if (!result)
+            {
+                error_msg_ = query.error();
+                return EXIT_FAILURE;
+            }
         }
 
         mapped_entry_vec_.reserve(result.num_rows());
@@ -312,7 +360,7 @@ public:
         return EXIT_SUCCESS;
     }
 
-    int search_fulltext(const std::string& user_query, std::size_t limit = 20, std::size_t offset = 0) override
+    int search_fulltext(const std::string& user_query, std::size_t limit = 20, std::size_t offset = 0, const std::string& source_filter = "") override
     {
         clear_state();
 
@@ -330,36 +378,71 @@ public:
         const std::vector<std::string> anchor_terms = split_terms(user_query);
         const std::string anchor = anchor_terms.empty() ? user_query : anchor_terms.front();
 
-        mysqlpp::Query query = conn().query(
-            "SELECT "
-            "  document_id, "
-            "  filename, "
-            "  source, "
-            "  page_count, "
-            "  MATCH(full_text) AGAINST (%0q IN NATURAL LANGUAGE MODE) AS score, "
-            "  created_at, "
-            "  SUBSTRING(full_text, "
-            "            GREATEST(CAST(LOCATE(%1q, full_text) AS SIGNED) - 4000, 1), "
-            "            8000) AS excerpt "
-            "FROM documents "
-            "WHERE MATCH(full_text) AGAINST (%2q IN NATURAL LANGUAGE MODE) "
-            "ORDER BY score DESC, document_id DESC "
-            "LIMIT %3 OFFSET %4"
-        );
-        query.parse();
-
-        mysqlpp::StoreQueryResult result = query.store(
-            user_query,
-            anchor,
-            user_query,
-            mysqlpp::sql_int(limit),
-            mysqlpp::sql_int(offset)
-        );
-
-        if (!result)
+        mysqlpp::StoreQueryResult result;
+        if (source_filter.empty())
         {
-            error_msg_ = query.error();
-            return EXIT_FAILURE;
+            mysqlpp::Query query = conn().query(
+                "SELECT "
+                "  document_id, "
+                "  filename, "
+                "  source, "
+                "  page_count, "
+                "  MATCH(full_text) AGAINST (%0q IN NATURAL LANGUAGE MODE) AS score, "
+                "  created_at, "
+                "  SUBSTRING(full_text, "
+                "            GREATEST(CAST(LOCATE(%1q, full_text) AS SIGNED) - 4000, 1), "
+                "            8000) AS excerpt "
+                "FROM documents "
+                "WHERE MATCH(full_text) AGAINST (%2q IN NATURAL LANGUAGE MODE) "
+                "ORDER BY score DESC, document_id DESC "
+                "LIMIT %3 OFFSET %4"
+            );
+            query.parse();
+            result = query.store(
+                user_query,
+                anchor,
+                user_query,
+                mysqlpp::sql_int(limit),
+                mysqlpp::sql_int(offset)
+            );
+            if (!result)
+            {
+                error_msg_ = query.error();
+                return EXIT_FAILURE;
+            }
+        }
+        else
+        {
+            mysqlpp::Query query = conn().query(
+                "SELECT "
+                "  document_id, "
+                "  filename, "
+                "  source, "
+                "  page_count, "
+                "  MATCH(full_text) AGAINST (%0q IN NATURAL LANGUAGE MODE) AS score, "
+                "  created_at, "
+                "  SUBSTRING(full_text, "
+                "            GREATEST(CAST(LOCATE(%1q, full_text) AS SIGNED) - 4000, 1), "
+                "            8000) AS excerpt "
+                "FROM documents "
+                "WHERE MATCH(full_text) AGAINST (%2q IN NATURAL LANGUAGE MODE) AND source = %3q "
+                "ORDER BY score DESC, document_id DESC "
+                "LIMIT %4 OFFSET %5"
+            );
+            query.parse();
+            result = query.store(
+                user_query,
+                anchor,
+                user_query,
+                source_filter,
+                mysqlpp::sql_int(limit),
+                mysqlpp::sql_int(offset)
+            );
+            if (!result)
+            {
+                error_msg_ = query.error();
+                return EXIT_FAILURE;
+            }
         }
 
         search_results_.reserve(result.num_rows());
@@ -728,7 +811,7 @@ public:
         return EXIT_SUCCESS;
     }
 
-    int list_all(std::size_t limit = 100, std::size_t offset = 0) override
+    int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::string& source_filter = "") override
     {
         clear_state();
 
@@ -737,6 +820,10 @@ public:
 
         for (const auto& kv : documents_by_id_)
         {
+            if (!source_filter.empty() && std::string(kv.second.source) != source_filter)
+            {
+                continue;
+            }
             ids.push_back(kv.first);
         }
 
@@ -761,7 +848,8 @@ public:
 
     int search_by_filename(const std::string& query,
                            std::size_t limit = 20,
-                           std::size_t offset = 0) override
+                           std::size_t offset = 0,
+                           const std::string& source_filter = "") override
     {
         clear_state();
 
@@ -777,6 +865,10 @@ public:
         for (const auto& kv : documents_by_id_)
         {
             const CourtDocument& doc = kv.second;
+            if (!source_filter.empty() && std::string(doc.source) != source_filter)
+            {
+                continue;
+            }
             const std::string filename = std::string(doc.filename);
             if (to_lower_copy(filename).find(needle) != std::string::npos)
             {
@@ -832,7 +924,8 @@ public:
 
     int search_fulltext(const std::string& query,
                         std::size_t limit = 20,
-                        std::size_t offset = 0) override
+                        std::size_t offset = 0,
+                        const std::string& source_filter = "") override
     {
         clear_state();
 
@@ -853,6 +946,10 @@ public:
         for (const auto& kv : documents_by_id_)
         {
             const CourtDocument& doc = kv.second;
+            if (!source_filter.empty() && std::string(doc.source) != source_filter)
+            {
+                continue;
+            }
             const std::string full_text = std::string(doc.full_text);
             const std::string lower_text = to_lower_copy(full_text);
 
@@ -1105,6 +1202,29 @@ inline std::size_t parse_size_param(const char* raw, std::size_t fallback, std::
     return std::min<std::size_t>(parsed, max_value);
 }
 
+inline bool parse_source_param(const char* raw, std::string& source_filter)
+{
+    source_filter.clear();
+    if (!raw || *raw == '\0')
+    {
+        return true;
+    }
+
+    const std::string value(raw);
+    if (value == "all")
+    {
+        return true;
+    }
+
+    if (value == "doj" || value == "cl" || value == "dc")
+    {
+        source_filter = value;
+        return true;
+    }
+
+    return false;
+}
+
 template <typename... Middlewares>
 void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectionPool& pool_ptr)
 {
@@ -1134,8 +1254,13 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
 
         std::size_t limit  = parse_size_param(req.url_params.get("limit"), 100, 100);
         std::size_t offset = parse_size_param(req.url_params.get("offset"), 0, 1000000);
+        std::string source_filter;
+        if (!parse_source_param(req.url_params.get("source"), source_filter))
+        {
+            return crow::response(400, "Invalid source parameter");
+        }
 
-        int result = repo.list_all(limit, offset);
+        int result = repo.list_all(limit, offset, source_filter);
         if (result != EXIT_SUCCESS)
         {
             return crow::response(500, repo.error());
@@ -1160,8 +1285,13 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
 
         std::size_t limit  = parse_size_param(req.url_params.get("limit"), 20, 50);
         std::size_t offset = parse_size_param(req.url_params.get("offset"), 0, 10000);
+        std::string source_filter;
+        if (!parse_source_param(req.url_params.get("source"), source_filter))
+        {
+            return crow::response(400, "Invalid source parameter");
+        }
 
-        int result = repo.search_by_filename(q, limit, offset);
+        int result = repo.search_by_filename(q, limit, offset, source_filter);
         if (result != EXIT_SUCCESS)
         {
             return crow::response(500, repo.error());
@@ -1203,8 +1333,13 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
 
         std::size_t limit  = parse_size_param(req.url_params.get("limit"), 20, 50);
         std::size_t offset = parse_size_param(req.url_params.get("offset"), 0, 10000);
+        std::string source_filter;
+        if (!parse_source_param(req.url_params.get("source"), source_filter))
+        {
+            return crow::response(400, "Invalid source parameter");
+        }
 
-        int result = repo.search_fulltext(q, limit, offset);
+        int result = repo.search_fulltext(q, limit, offset, source_filter);
         if (result != EXIT_SUCCESS)
         {
             return crow::response(500, repo.error());
