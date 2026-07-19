@@ -148,10 +148,10 @@ struct ICourtDocumentsRepository
     virtual ~ICourtDocumentsRepository() = default;
 
     virtual int get_by_id(int id) = 0;
-    virtual int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}) = 0;
+    virtual int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0) = 0;
     virtual int get_pages_by_document_id(int document_id) = 0;
-    virtual int search_fulltext(const std::string& query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}) = 0;
-    virtual int search_by_filename(const std::string& query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}) = 0;
+    virtual int search_fulltext(const std::string& query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0) = 0;
+    virtual int search_by_filename(const std::string& query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0) = 0;
     virtual const char* error() = 0;
     virtual CourtDocument get_mapped_entry() = 0;
     virtual std::vector<CourtDocument> get_mapped_entry_vector() = 0;
@@ -210,7 +210,7 @@ public:
         return EXIT_SUCCESS;
     }
 
-    int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}) override
+    int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0) override
     {
         clear_state();
 
@@ -220,11 +220,14 @@ public:
             mysqlpp::Query query = conn().query(
                 "SELECT document_id, filename, source, page_count, created_at "
                 "FROM documents "
+                "WHERE page_count >= %0 AND (%1 = 0 OR page_count <= %1) "
                 "ORDER BY document_id DESC "
-                "LIMIT %0 OFFSET %1"
+                "LIMIT %2 OFFSET %3"
             );
             query.parse();
             result = query.store(
+                mysqlpp::sql_int(min_pages),
+                mysqlpp::sql_int(max_pages),
                 mysqlpp::sql_int(limit),
                 mysqlpp::sql_int(offset)
             );
@@ -239,15 +242,17 @@ public:
             mysqlpp::Query query = conn().query(
                 "SELECT document_id, filename, source, page_count, created_at "
                 "FROM documents "
-                "WHERE source IN (%0q, %1q, %2q) "
+                "WHERE source IN (%0q, %1q, %2q) AND page_count >= %3 AND (%4 = 0 OR page_count <= %4) "
                 "ORDER BY document_id DESC "
-                "LIMIT %3 OFFSET %4"
+                "LIMIT %5 OFFSET %6"
             );
             query.parse();
             result = query.store(
                 source_at(source_filters, 0),
                 source_at(source_filters, 1),
                 source_at(source_filters, 2),
+                mysqlpp::sql_int(min_pages),
+                mysqlpp::sql_int(max_pages),
                 mysqlpp::sql_int(limit),
                 mysqlpp::sql_int(offset)
             );
@@ -267,7 +272,7 @@ public:
         return EXIT_SUCCESS;
     }
 
-    int search_by_filename(const std::string& user_query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}) override
+    int search_by_filename(const std::string& user_query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0) override
     {
         clear_state();
 
@@ -284,13 +289,15 @@ public:
             mysqlpp::Query query = conn().query(
                 "SELECT document_id, filename, source, page_count, created_at "
                 "FROM documents "
-                "WHERE filename LIKE %0q "
-                "ORDER BY CASE WHEN filename = %1q THEN 0 ELSE 1 END, filename ASC, document_id DESC "
-                "LIMIT %2 OFFSET %3"
+                "WHERE filename LIKE %0q AND page_count >= %1 AND (%2 = 0 OR page_count <= %2) "
+                "ORDER BY CASE WHEN filename = %3q THEN 0 ELSE 1 END, filename ASC, document_id DESC "
+                "LIMIT %4 OFFSET %5"
             );
             query.parse();
             result = query.store(
                 pattern,
+                mysqlpp::sql_int(min_pages),
+                mysqlpp::sql_int(max_pages),
                 user_query,
                 mysqlpp::sql_int(limit),
                 mysqlpp::sql_int(offset)
@@ -306,9 +313,9 @@ public:
             mysqlpp::Query query = conn().query(
                 "SELECT document_id, filename, source, page_count, created_at "
                 "FROM documents "
-                "WHERE filename LIKE %0q AND source IN (%1q, %2q, %3q) "
-                "ORDER BY CASE WHEN filename = %4q THEN 0 ELSE 1 END, filename ASC, document_id DESC "
-                "LIMIT %5 OFFSET %6"
+                "WHERE filename LIKE %0q AND source IN (%1q, %2q, %3q) AND page_count >= %4 AND (%5 = 0 OR page_count <= %5) "
+                "ORDER BY CASE WHEN filename = %6q THEN 0 ELSE 1 END, filename ASC, document_id DESC "
+                "LIMIT %7 OFFSET %8"
             );
             query.parse();
             result = query.store(
@@ -316,6 +323,8 @@ public:
                 source_at(source_filters, 0),
                 source_at(source_filters, 1),
                 source_at(source_filters, 2),
+                mysqlpp::sql_int(min_pages),
+                mysqlpp::sql_int(max_pages),
                 user_query,
                 mysqlpp::sql_int(limit),
                 mysqlpp::sql_int(offset)
@@ -364,7 +373,7 @@ public:
         return EXIT_SUCCESS;
     }
 
-    int search_fulltext(const std::string& user_query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}) override
+    int search_fulltext(const std::string& user_query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0) override
     {
         clear_state();
 
@@ -397,15 +406,17 @@ public:
                 "            GREATEST(CAST(LOCATE(%1q, full_text) AS SIGNED) - 4000, 1), "
                 "            8000) AS excerpt "
                 "FROM documents "
-                "WHERE MATCH(full_text) AGAINST (%2q IN NATURAL LANGUAGE MODE) "
+                "WHERE MATCH(full_text) AGAINST (%2q IN NATURAL LANGUAGE MODE) AND page_count >= %3 AND (%4 = 0 OR page_count <= %4) "
                 "ORDER BY score DESC, document_id DESC "
-                "LIMIT %3 OFFSET %4"
+                "LIMIT %5 OFFSET %6"
             );
             query.parse();
             result = query.store(
                 user_query,
                 anchor,
                 user_query,
+                mysqlpp::sql_int(min_pages),
+                mysqlpp::sql_int(max_pages),
                 mysqlpp::sql_int(limit),
                 mysqlpp::sql_int(offset)
             );
@@ -429,9 +440,9 @@ public:
                 "            GREATEST(CAST(LOCATE(%1q, full_text) AS SIGNED) - 4000, 1), "
                 "            8000) AS excerpt "
                 "FROM documents "
-                "WHERE MATCH(full_text) AGAINST (%2q IN NATURAL LANGUAGE MODE) AND source IN (%3q, %4q, %5q) "
+                "WHERE MATCH(full_text) AGAINST (%2q IN NATURAL LANGUAGE MODE) AND source IN (%3q, %4q, %5q) AND page_count >= %6 AND (%7 = 0 OR page_count <= %7) "
                 "ORDER BY score DESC, document_id DESC "
-                "LIMIT %6 OFFSET %7"
+                "LIMIT %8 OFFSET %9"
             );
             query.parse();
             result = query.store(
@@ -441,6 +452,8 @@ public:
                 source_at(source_filters, 0),
                 source_at(source_filters, 1),
                 source_at(source_filters, 2),
+                mysqlpp::sql_int(min_pages),
+                mysqlpp::sql_int(max_pages),
                 mysqlpp::sql_int(limit),
                 mysqlpp::sql_int(offset)
             );
@@ -822,7 +835,7 @@ public:
         return EXIT_SUCCESS;
     }
 
-    int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}) override
+    int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0) override
     {
         clear_state();
 
@@ -831,7 +844,7 @@ public:
 
         for (const auto& kv : documents_by_id_)
         {
-            if (!source_matches(source_filters, std::string(kv.second.source)))
+            if (!source_matches(source_filters, std::string(kv.second.source)) || !page_count_matches(kv.second.page_count, min_pages, max_pages))
             {
                 continue;
             }
@@ -860,7 +873,7 @@ public:
     int search_by_filename(const std::string& query,
                            std::size_t limit = 20,
                            std::size_t offset = 0,
-                           const std::vector<std::string>& source_filters = {}) override
+                           const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0) override
     {
         clear_state();
 
@@ -876,7 +889,7 @@ public:
         for (const auto& kv : documents_by_id_)
         {
             const CourtDocument& doc = kv.second;
-            if (!source_matches(source_filters, std::string(doc.source)))
+            if (!source_matches(source_filters, std::string(doc.source)) || !page_count_matches(doc.page_count, min_pages, max_pages))
             {
                 continue;
             }
@@ -936,7 +949,7 @@ public:
     int search_fulltext(const std::string& query,
                         std::size_t limit = 20,
                         std::size_t offset = 0,
-                        const std::vector<std::string>& source_filters = {}) override
+                        const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0) override
     {
         clear_state();
 
@@ -957,7 +970,7 @@ public:
         for (const auto& kv : documents_by_id_)
         {
             const CourtDocument& doc = kv.second;
-            if (!source_matches(source_filters, std::string(doc.source)))
+            if (!source_matches(source_filters, std::string(doc.source)) || !page_count_matches(doc.page_count, min_pages, max_pages))
             {
                 continue;
             }
@@ -1064,6 +1077,12 @@ private:
     {
         return source_filters.empty() ||
             std::find(source_filters.begin(), source_filters.end(), source) != source_filters.end();
+    }
+
+    static bool page_count_matches(int page_count, std::size_t min_pages, std::size_t max_pages)
+    {
+        return page_count >= static_cast<int>(min_pages) &&
+            (max_pages == 0 || page_count <= static_cast<int>(max_pages));
     }
 
     static std::string to_lower_copy(const std::string& input)
@@ -1218,6 +1237,29 @@ inline std::size_t parse_size_param(const char* raw, std::size_t fallback, std::
 
     return std::min<std::size_t>(parsed, max_value);
 }
+inline bool parse_page_count_param(const char* raw, std::size_t& value, std::size_t fallback, std::size_t max_value)
+{
+    value = fallback;
+    if (!raw || *raw == '\0')
+    {
+        return true;
+    }
+    if (raw[0] == '-')
+    {
+        return false;
+    }
+
+    char* end = nullptr;
+    const unsigned long parsed = std::strtoul(raw, &end, 10);
+    if (end == raw || *end != '\0')
+    {
+        return false;
+    }
+
+    value = std::min<std::size_t>(parsed, max_value);
+    return true;
+}
+
 
 inline bool parse_source_param(const char* raw, std::vector<std::string>& source_filters)
 {
@@ -1296,7 +1338,16 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
             return crow::response(400, "Invalid source parameter");
         }
 
-        int result = repo.list_all(limit, offset, source_filters);
+        std::size_t min_pages = 0;
+        std::size_t max_pages = 0;
+        if (!parse_page_count_param(req.url_params.get("page_min"), min_pages, 0, 1000000) ||
+            !parse_page_count_param(req.url_params.get("page_max"), max_pages, 0, 1000000) ||
+            (max_pages != 0 && min_pages > max_pages))
+        {
+            return crow::response(400, "Invalid page range parameter");
+        }
+
+        int result = repo.list_all(limit, offset, source_filters, min_pages, max_pages);
         if (result != EXIT_SUCCESS)
         {
             return crow::response(500, repo.error());
@@ -1327,7 +1378,16 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
             return crow::response(400, "Invalid source parameter");
         }
 
-        int result = repo.search_by_filename(q, limit, offset, source_filters);
+        std::size_t min_pages = 0;
+        std::size_t max_pages = 0;
+        if (!parse_page_count_param(req.url_params.get("page_min"), min_pages, 0, 1000000) ||
+            !parse_page_count_param(req.url_params.get("page_max"), max_pages, 0, 1000000) ||
+            (max_pages != 0 && min_pages > max_pages))
+        {
+            return crow::response(400, "Invalid page range parameter");
+        }
+
+        int result = repo.search_by_filename(q, limit, offset, source_filters, min_pages, max_pages);
         if (result != EXIT_SUCCESS)
         {
             return crow::response(500, repo.error());
@@ -1375,7 +1435,16 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
             return crow::response(400, "Invalid source parameter");
         }
 
-        int result = repo.search_fulltext(q, limit, offset, source_filters);
+        std::size_t min_pages = 0;
+        std::size_t max_pages = 0;
+        if (!parse_page_count_param(req.url_params.get("page_min"), min_pages, 0, 1000000) ||
+            !parse_page_count_param(req.url_params.get("page_max"), max_pages, 0, 1000000) ||
+            (max_pages != 0 && min_pages > max_pages))
+        {
+            return crow::response(400, "Invalid page range parameter");
+        }
+
+        int result = repo.search_fulltext(q, limit, offset, source_filters, min_pages, max_pages);
         if (result != EXIT_SUCCESS)
         {
             return crow::response(500, repo.error());
