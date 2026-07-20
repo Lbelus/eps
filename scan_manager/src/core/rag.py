@@ -183,8 +183,13 @@ def _execute_tool(conn: sqlite3.Connection, name: str, tool_input: dict) -> tupl
         return f"Query error: {e}", True
 
 
-def run_turn(client: anthropic.Anthropic, conn: sqlite3.Connection, messages: list) -> None:
-    """One user turn: stream the answer, executing tool calls until the model is done."""
+def stream_turn(client: anthropic.Anthropic, conn: sqlite3.Connection, messages: list):
+    """One user turn as an event generator, executing tool calls until the model is done.
+
+    Yields {"type": "text", "text": ...} for answer deltas and
+    {"type": "tool", "name": ..., "input": ...} before each tool call.
+    Appends assistant/tool-result turns to `messages` as it goes.
+    """
     while True:
         with client.messages.stream(
             model=MODEL,
@@ -199,20 +204,19 @@ def run_turn(client: anthropic.Anthropic, conn: sqlite3.Connection, messages: li
             messages=messages,
         ) as stream:
             for text in stream.text_stream:
-                print(text, end="", flush=True)
+                yield {"type": "text", "text": text}
             response = stream.get_final_message()
 
         messages.append({"role": "assistant", "content": response.content})
 
         if response.stop_reason != "tool_use":
-            print()
             return
 
         tool_results = []
         for block in response.content:
             if block.type != "tool_use":
                 continue
-            print(f"\n  [{block.name}: {block.input}]", flush=True)
+            yield {"type": "tool", "name": block.name, "input": block.input}
             result, is_error = _execute_tool(conn, block.name, block.input)
             tool_results.append({
                 "type": "tool_result",
@@ -221,6 +225,16 @@ def run_turn(client: anthropic.Anthropic, conn: sqlite3.Connection, messages: li
                 "is_error": is_error,
             })
         messages.append({"role": "user", "content": tool_results})
+
+
+def run_turn(client: anthropic.Anthropic, conn: sqlite3.Connection, messages: list) -> None:
+    """CLI consumer of stream_turn: print deltas and tool-call notices."""
+    for event in stream_turn(client, conn, messages):
+        if event["type"] == "text":
+            print(event["text"], end="", flush=True)
+        elif event["type"] == "tool":
+            print(f"\n  [{event['name']}: {event['input']}]", flush=True)
+    print()
 
 
 def chat_cli(db_path: str):
