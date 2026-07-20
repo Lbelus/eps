@@ -3,6 +3,7 @@ import Head from "next/head";
 import type { AppProps } from "next/app";
 import { useRouter } from "next/router";
 import { ThemeProvider } from "next-themes";
+import CookieNotice from "@/components/privacy/CookieNotice";
 
 const siteName = "EPS - Epstein Paper System";
 const siteDescription =
@@ -46,6 +47,7 @@ export default function App({ Component, pageProps }: AppProps) {
       </Head>
       <ThemeProvider attribute="class" defaultTheme="light">
         <Component {...pageProps} />
+        <CookieNotice />
       </ThemeProvider>
     </>
   );

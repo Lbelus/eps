@@ -25,6 +25,9 @@ const Privacy = () => {
           Search terms and interactions may be handled by the application and REST API to return results, diagnose issues, and monitor reliability.
         </p>
         <p>
+          EPS does not use analytics cookies. The frontend may use local browser storage for basic preferences such as theme and notice dismissal, while the hosting provider may keep standard operational and security logs.
+        </p>
+        <p>
           EPS does not sell user data. Access to operational data should be limited to maintainers or authorized service providers who need it to run the project.
         </p>
         <p>

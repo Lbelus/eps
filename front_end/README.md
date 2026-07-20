@@ -113,6 +113,7 @@ npm run dev       # Start the local Next.js dev server
 npm run build     # Build the production app and run next-sitemap postbuild
 npm run start     # Start the production server after a build
 npm run lint      # Run Next lint, if lint config is initialized
+npm run logs:classify # Classify newline-delimited Vercel JSON logs from stdin
 npm run test      # Run Jest
 ```
 
@@ -180,6 +181,36 @@ front_end/
 - Inspect document metadata.
 
 Snippets from the API mark highlighted matches with `>>>` and `<<<`; the UI renders those markers as highlighted text.
+
+## Logs-Only Traffic Estimate
+
+This project does not use client-side analytics by default. For a rough frontend traffic estimate on Vercel, export production logs and classify them locally instead of adding a tracking script.
+
+Install and authenticate the Vercel CLI outside the app if needed, then run from `front_end/`:
+
+```bash
+vercel logs --environment production --json --since 24h | npm run logs:classify
+```
+
+The classifier reads newline-delimited JSON logs from stdin and prints aggregate counts only:
+
+```json
+{
+  "human_browser": 0,
+  "known_bot": 0,
+  "likely_bot": 0,
+  "unknown": 0
+}
+```
+
+Privacy rules for this workflow:
+
+- Do not add Vercel Analytics, Plausible, PostHog, or another client analytics script unless the project explicitly accepts that data sharing.
+- Do not keep raw Vercel logs long term. Store only aggregate daily counts if history is needed.
+- Do not add log drains to third-party services.
+- Keep search terms, document state, and REST API calls out of Vercel page URLs.
+
+The estimate is intentionally approximate. User-Agent classification can identify many known bots and normal browser requests, but it is not a unique visitor counter.
 
 ## Production Checklist
 
