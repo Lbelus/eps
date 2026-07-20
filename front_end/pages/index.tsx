@@ -60,6 +60,13 @@ export default function Home() {
                 <p className="text-sm text-slate-600">Search and paginate documents from the /courtdocuments API.</p>
               </Link>
               <Link
+                href="/services/rag-chat"
+                className="block rounded-lg border border-slate-200 bg-white/80 px-4 py-3 text-slate-700 shadow-sm transition hover:shadow-md dark:border-slate-700 dark:bg-slate-900"
+              >
+                <h3 className="text-lg font-semibold text-slate-900">RAG chat</h3>
+                <p className="text-sm text-slate-600">Ask questions about the corpus and get cited answers from Claude.</p>
+              </Link>
+              <Link
                 href="/services/matrix-chat"
                 className="block rounded-lg border border-slate-200 bg-white/80 px-4 py-3 text-slate-700 shadow-sm transition hover:shadow-md dark:border-slate-700 dark:bg-slate-900"
               >
