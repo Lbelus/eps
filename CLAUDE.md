@@ -60,7 +60,12 @@ uvicorn --app-dir src api.rag_server:app --port 8000   # SSE API for the front_e
 #   RAG_PROVIDER=openai python src/main.py --mode chat
 #   RAG_PROVIDER=openai uvicorn --app-dir src api.rag_server:app --port 8000
 # Env vars: RAG_PROVIDER (anthropic|openai), RAG_MODEL (default qwen3:8b for openai),
-#           RAG_BASE_URL (default http://localhost:11434/v1), RAG_API_KEY
+#           RAG_BASE_URL (default http://localhost:11434/v1), RAG_API_KEY,
+#           RAG_REASONING (default "none" — hidden reasoning dominates local latency),
+#           RAG_FORCE_SEARCH (default 1 — client-enforced search-before-answer),
+#           RAG_TEMPERATURE (default 0.2)
+# Run Ollama with a large enough context or prompts get silently truncated:
+#   OLLAMA_CONTEXT_LENGTH=16384 ollama serve
 
 # --- Legacy token pipeline ---
 python src/main.py --mode scan                     # Full pipeline: OCR → tokenize → CSV

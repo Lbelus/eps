@@ -40,8 +40,14 @@ def make_client():
     if PROVIDER == "openai":
         return openai.OpenAI(base_url=BASE_URL, api_key=API_KEY)
     raise ValueError(f"Unknown RAG_PROVIDER: {PROVIDER}")
-MAX_PAGES_PER_READ = 5
-MAX_CHARS_PER_PAGE = 8000
+# Local models pay heavily for prompt processing — keep retrieval payloads
+# smaller there so each tool round-trip stays fast.
+if PROVIDER == "openai":
+    MAX_PAGES_PER_READ = 3
+    MAX_CHARS_PER_PAGE = 4000
+else:
+    MAX_PAGES_PER_READ = 5
+    MAX_CHARS_PER_PAGE = 8000
 
 SYSTEM_PROMPT = """You are a research assistant for a corpus of public court filings and \
 government releases related to the Jeffrey Epstein and Ghislaine Maxwell cases \
@@ -60,6 +66,32 @@ any background context that does not come from the corpus.
 
 The search tool uses SQLite FTS5 MATCH syntax: bare terms are ANDed; use OR, \
 NEAR(a b, N), quoted "exact phrases", and prefix* matching as needed."""
+
+# Small local models need blunter guardrails than Claude: without them they
+# skip retrieval and fabricate citations.
+if PROVIDER == "openai":
+    SYSTEM_PROMPT += (
+        "\n\nIMPORTANT: You MUST call search_documents before answering any question "
+        "about the cases or documents — never answer from memory. Only cite filenames "
+        "and page numbers that appeared in a tool result this conversation; never "
+        "invent or placeholder a citation."
+    )
+
+# Reasoning models (qwen3, gpt-oss, ...) generate lengthy hidden reasoning
+# before every answer, which dominates local latency — a one-sentence answer
+# can cost thousands of invisible tokens. Default it off; set RAG_REASONING
+# to low/medium/high to trade latency for answer quality, or "" to omit the
+# parameter for servers that reject it.
+REASONING_EFFORT = os.environ.get("RAG_REASONING", "none")
+
+# With reasoning off, small models sometimes skip retrieval and answer from
+# memory with invented citations. Forcing a tool call on the first round of
+# each turn prevents that; set RAG_FORCE_SEARCH=0 to disable.
+FORCE_TOOL_FIRST = os.environ.get("RAG_FORCE_SEARCH", "1") == "1"
+
+# Low temperature makes tool-calling far more reliable on small local models
+# (at the default ~0.8, qwen3 skips forced tool calls often enough to matter).
+TEMPERATURE = float(os.environ.get("RAG_TEMPERATURE", "0.2"))
 
 TOOLS = [
     {
@@ -312,13 +344,19 @@ class _ThinkFilter:
 
 
 def _stream_turn_openai(client: "openai.OpenAI", conn: sqlite3.Connection, messages: list):
+    reasoning_kwargs = {"reasoning_effort": REASONING_EFFORT} if REASONING_EFFORT else {}
+    force_search = FORCE_TOOL_FIRST
+    nudged = False
     while True:
         stream = client.chat.completions.create(
             model=MODEL,
             max_tokens=MAX_TOKENS,
             messages=[{"role": "system", "content": SYSTEM_PROMPT}] + messages,
             tools=_openai_tools(),
+            tool_choice="required" if force_search else "auto",
+            temperature=TEMPERATURE,
             stream=True,
+            **reasoning_kwargs,
         )
         think_filter = _ThinkFilter()
         content_parts = []
@@ -331,7 +369,10 @@ def _stream_turn_openai(client: "openai.OpenAI", conn: sqlite3.Connection, messa
                 visible = think_filter.feed(delta.content)
                 if visible:
                     content_parts.append(visible)
-                    yield {"type": "text", "text": visible}
+                    # While forcing retrieval, hold text back — if the model
+                    # answered without searching we discard it and retry.
+                    if not force_search:
+                        yield {"type": "text", "text": visible}
             for tc in delta.tool_calls or []:
                 entry = tool_calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
                 if tc.id:
@@ -339,6 +380,23 @@ def _stream_turn_openai(client: "openai.OpenAI", conn: sqlite3.Connection, messa
                 if tc.function:
                     entry["name"] += tc.function.name or ""
                     entry["arguments"] += tc.function.arguments or ""
+
+        # Some servers (Ollama) treat tool_choice="required" as advisory —
+        # enforce it here: throw away the ungrounded answer and demand
+        # retrieval once, then accept whatever comes back.
+        if force_search and not tool_calls and not nudged:
+            nudged = True
+            messages.append({
+                "role": "system",
+                "content": "Do not answer from memory. Call search_documents for the "
+                           "user's question before answering, and cite only filenames "
+                           "returned by tools.",
+            })
+            continue
+        if force_search:
+            for part in content_parts:  # flush text withheld during the forced round
+                yield {"type": "text", "text": part}
+        force_search = False
 
         assistant_msg = {"role": "assistant", "content": "".join(content_parts)}
         if tool_calls:
