@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "postbuild": "next-sitemap",
+    "logs:classify": "node scripts/classify-vercel-logs.mjs",
     "test": "jest"
   },
   "dependencies": {
