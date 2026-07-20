@@ -1,19 +1,45 @@
 """
 Conversational RAG over the Epstein/Maxwell document database.
 
-Claude drives retrieval agentically: it searches the FTS5 index, locates
+The model drives retrieval agentically: it searches the FTS5 index, locates
 pages inside matching documents, reads the page text, and answers with
 filename + page citations. Conversation history is kept for follow-ups.
+
+Two backends, selected with RAG_PROVIDER:
+  - "anthropic" (default): Claude via the Anthropic API
+  - "openai": any OpenAI-compatible server — Ollama, vLLM, LM Studio, etc.
+
+Environment variables:
+  RAG_PROVIDER   anthropic | openai
+  RAG_MODEL      model id (defaults: claude-opus-4-8 / qwen3:8b)
+  RAG_BASE_URL   openai provider only (default http://localhost:11434/v1)
+  RAG_API_KEY    openai provider only (default "ollama"; local servers ignore it)
 """
 
+import json
+import os
 import sqlite3
 
 import anthropic
+import openai
 
 from core.database import init_db
 
-MODEL = "claude-opus-4-8"
+PROVIDER = os.environ.get("RAG_PROVIDER", "anthropic")
+MODEL = os.environ.get("RAG_MODEL") or ("claude-opus-4-8" if PROVIDER == "anthropic" else "qwen3:8b")
+BASE_URL = os.environ.get("RAG_BASE_URL", "http://localhost:11434/v1")
+API_KEY = os.environ.get("RAG_API_KEY", "ollama")
 MAX_TOKENS = 16000
+
+ProviderError = (anthropic.APIError, openai.OpenAIError)
+
+
+def make_client():
+    if PROVIDER == "anthropic":
+        return anthropic.Anthropic()
+    if PROVIDER == "openai":
+        return openai.OpenAI(base_url=BASE_URL, api_key=API_KEY)
+    raise ValueError(f"Unknown RAG_PROVIDER: {PROVIDER}")
 MAX_PAGES_PER_READ = 5
 MAX_CHARS_PER_PAGE = 8000
 
@@ -183,13 +209,21 @@ def _execute_tool(conn: sqlite3.Connection, name: str, tool_input: dict) -> tupl
         return f"Query error: {e}", True
 
 
-def stream_turn(client: anthropic.Anthropic, conn: sqlite3.Connection, messages: list):
+def stream_turn(client, conn: sqlite3.Connection, messages: list):
     """One user turn as an event generator, executing tool calls until the model is done.
 
     Yields {"type": "text", "text": ...} for answer deltas and
     {"type": "tool", "name": ..., "input": ...} before each tool call.
-    Appends assistant/tool-result turns to `messages` as it goes.
+    Appends assistant/tool-result turns to `messages` as it goes
+    (message format is provider-specific — don't mix providers in one session).
     """
+    if PROVIDER == "openai":
+        yield from _stream_turn_openai(client, conn, messages)
+    else:
+        yield from _stream_turn_anthropic(client, conn, messages)
+
+
+def _stream_turn_anthropic(client: anthropic.Anthropic, conn: sqlite3.Connection, messages: list):
     while True:
         with client.messages.stream(
             model=MODEL,
@@ -227,7 +261,115 @@ def stream_turn(client: anthropic.Anthropic, conn: sqlite3.Connection, messages:
         messages.append({"role": "user", "content": tool_results})
 
 
-def run_turn(client: anthropic.Anthropic, conn: sqlite3.Connection, messages: list) -> None:
+def _openai_tools() -> list[dict]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t["description"],
+                "parameters": t["input_schema"],
+            },
+        }
+        for t in TOOLS
+    ]
+
+
+class _ThinkFilter:
+    """Suppress inline <think>...</think> reasoning some open models stream."""
+
+    def __init__(self):
+        self._buffer = ""
+        self._thinking = False
+
+    def feed(self, delta: str) -> str:
+        self._buffer += delta
+        out = []
+        while self._buffer:
+            if self._thinking:
+                end = self._buffer.find("</think>")
+                if end == -1:
+                    self._buffer = self._buffer[-8:]  # keep a partial-tag tail
+                    break
+                self._buffer = self._buffer[end + len("</think>"):]
+                self._thinking = False
+            else:
+                start = self._buffer.find("<think>")
+                if start == -1:
+                    # Hold back a potential partial "<think" prefix at the end.
+                    safe = len(self._buffer)
+                    for k in range(1, min(len("<think>"), safe) + 1):
+                        if "<think>".startswith(self._buffer[safe - k:]):
+                            safe -= k
+                            break
+                    out.append(self._buffer[:safe])
+                    self._buffer = self._buffer[safe:]
+                    break
+                out.append(self._buffer[:start])
+                self._buffer = self._buffer[start + len("<think>"):]
+                self._thinking = True
+        return "".join(out)
+
+
+def _stream_turn_openai(client: "openai.OpenAI", conn: sqlite3.Connection, messages: list):
+    while True:
+        stream = client.chat.completions.create(
+            model=MODEL,
+            max_tokens=MAX_TOKENS,
+            messages=[{"role": "system", "content": SYSTEM_PROMPT}] + messages,
+            tools=_openai_tools(),
+            stream=True,
+        )
+        think_filter = _ThinkFilter()
+        content_parts = []
+        tool_calls: dict[int, dict] = {}
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if delta.content:
+                visible = think_filter.feed(delta.content)
+                if visible:
+                    content_parts.append(visible)
+                    yield {"type": "text", "text": visible}
+            for tc in delta.tool_calls or []:
+                entry = tool_calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                if tc.id:
+                    entry["id"] = tc.id
+                if tc.function:
+                    entry["name"] += tc.function.name or ""
+                    entry["arguments"] += tc.function.arguments or ""
+
+        assistant_msg = {"role": "assistant", "content": "".join(content_parts)}
+        if tool_calls:
+            assistant_msg["tool_calls"] = [
+                {
+                    "id": entry["id"] or f"call_{index}",
+                    "type": "function",
+                    "function": {"name": entry["name"], "arguments": entry["arguments"]},
+                }
+                for index, entry in sorted(tool_calls.items())
+            ]
+        messages.append(assistant_msg)
+
+        if not tool_calls:
+            return
+
+        for call in assistant_msg["tool_calls"]:
+            name = call["function"]["name"]
+            try:
+                tool_input = json.loads(call["function"]["arguments"] or "{}")
+            except json.JSONDecodeError as e:
+                result = f"Invalid tool arguments (not JSON): {e}"
+            else:
+                yield {"type": "tool", "name": name, "input": tool_input}
+                result, is_error = _execute_tool(conn, name, tool_input)
+                if is_error:
+                    result = f"ERROR: {result}"
+            messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
+
+
+def run_turn(client, conn: sqlite3.Connection, messages: list) -> None:
     """CLI consumer of stream_turn: print deltas and tool-call notices."""
     for event in stream_turn(client, conn, messages):
         if event["type"] == "text":
@@ -242,9 +384,10 @@ def chat_cli(db_path: str):
     n_docs, n_pages = conn.execute(
         "SELECT (SELECT count(*) FROM documents), (SELECT count(*) FROM pages)"
     ).fetchone()
-    client = anthropic.Anthropic()
+    client = make_client()
 
-    print(f"RAG chat over {n_docs:,} documents / {n_pages:,} pages. 'exit' or Ctrl-D to quit.\n")
+    print(f"RAG chat over {n_docs:,} documents / {n_pages:,} pages "
+          f"({PROVIDER}: {MODEL}). 'exit' or Ctrl-D to quit.\n")
     messages = []
     while True:
         try:
@@ -260,7 +403,7 @@ def chat_cli(db_path: str):
         messages.append({"role": "user", "content": user_input})
         try:
             run_turn(client, conn, messages)
-        except anthropic.APIError as e:
+        except ProviderError as e:
             # Drop the failed turn so history stays valid for the next question.
             print(f"\n[API error: {e}]")
             del messages[turn_start:]

@@ -14,14 +14,13 @@ import json
 import secrets
 import threading
 
-import anthropic
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from core.database import init_db
-from core.rag import stream_turn
+from core.rag import MODEL, PROVIDER, ProviderError, make_client, stream_turn
 
 DB_PATH = "./data/epstein.db"
 
@@ -33,7 +32,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-client = anthropic.Anthropic()
+client = make_client()
 
 _sessions: dict[str, list] = {}
 _busy: set[str] = set()
@@ -58,7 +57,8 @@ def health():
         ).fetchone()
     finally:
         conn.close()
-    return {"status": "ok", "documents": n_docs, "pages": n_pages}
+    return {"status": "ok", "documents": n_docs, "pages": n_pages,
+            "provider": PROVIDER, "model": MODEL}
 
 
 @app.delete("/rag/session/{session_id}")
@@ -90,7 +90,7 @@ def chat(req: ChatRequest):
             for event in stream_turn(client, conn, messages):
                 yield _sse(event)
             yield _sse({"type": "done"})
-        except anthropic.APIError as e:
+        except ProviderError as e:
             # Roll back the failed turn so the session history stays valid.
             del messages[turn_start:]
             yield _sse({"type": "error", "message": str(e)})

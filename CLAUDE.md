@@ -51,9 +51,16 @@ python src/main.py --mode ingest --workers 2       # Limit parallel OCR workers
 python src/main.py --mode search --query "grand jury"          # Full-text search
 python src/main.py --mode search --query "flight logs" --limit 50
 
-# --- Conversational RAG (Claude over the FTS5 index) ---
-python src/main.py --mode chat                     # CLI chat REPL (needs ANTHROPIC_API_KEY)
+# --- Conversational RAG (LLM over the FTS5 index) ---
+python src/main.py --mode chat                     # CLI chat REPL (default: Claude, needs ANTHROPIC_API_KEY)
 uvicorn --app-dir src api.rag_server:app --port 8000   # SSE API for the front_end rag-chat page
+
+# Open-source model via any OpenAI-compatible server (Ollama, vLLM, LM Studio):
+#   ollama serve && ollama pull qwen3:8b
+#   RAG_PROVIDER=openai python src/main.py --mode chat
+#   RAG_PROVIDER=openai uvicorn --app-dir src api.rag_server:app --port 8000
+# Env vars: RAG_PROVIDER (anthropic|openai), RAG_MODEL (default qwen3:8b for openai),
+#           RAG_BASE_URL (default http://localhost:11434/v1), RAG_API_KEY
 
 # --- Legacy token pipeline ---
 python src/main.py --mode scan                     # Full pipeline: OCR → tokenize → CSV
