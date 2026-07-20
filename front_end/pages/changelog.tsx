@@ -11,6 +11,18 @@ type ChangelogEntry = {
 
 const entries: ChangelogEntry[] = [
   {
+    date: "2026-07-20",
+    title: "Current-page CSV export",
+    description:
+      "The document search page now lets visitors download the currently loaded result page as a metadata-only CSV, making it easier to keep a local shortlist without exporting OCR text.",
+  },
+  {
+    date: "2026-07-20",
+    title: "Cookie and privacy notice",
+    description:
+      "A site-wide notice now explains that EPS does not use analytics cookies, while the privacy page documents local preference storage and standard hosting logs.",
+  },
+  {
     date: "2026-07-19",
     title: "Document size filtering",
     description:
