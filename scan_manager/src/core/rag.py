@@ -22,7 +22,9 @@ import sqlite3
 
 import anthropic
 import openai
+import requests
 
+from core import embeddings
 from core.database import init_db
 
 PROVIDER = os.environ.get("RAG_PROVIDER", "anthropic")
@@ -55,9 +57,11 @@ government releases related to the Jeffrey Epstein and Ghislaine Maxwell cases \
 The corpus is OCR'd, so text may contain recognition errors.
 
 Answer questions using ONLY what you retrieve with your tools. Workflow: \
-search_documents to find candidate documents, find_pages to locate the relevant \
-pages inside a document, read_pages to read them before making claims. \
-Try multiple search phrasings (names, aliases, OCR-tolerant variants) before \
+search_documents (exact keywords) or semantic_search (concepts/paraphrase) to \
+find candidates, find_pages to locate the relevant pages inside a document, \
+read_pages to read them before making claims. Use search_documents for names, \
+case numbers, and exact phrases; use semantic_search when the wording is \
+uncertain or conceptual. Try multiple phrasings and both search tools before \
 concluding something is absent from the corpus.
 
 Cite every claim as (filename, p. N). If retrieval turns up nothing relevant, \
@@ -108,6 +112,23 @@ TOOLS = [
             "properties": {
                 "query": {"type": "string", "description": "FTS5 MATCH query"},
                 "limit": {"type": "integer", "description": "Max results (default 10)"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "semantic_search",
+        "description": (
+            "Semantic similarity search over individual pages — finds pages about a "
+            "concept even when the wording differs (paraphrases, synonyms, OCR noise). "
+            "Best for conceptual questions; for exact names, case numbers, or phrases "
+            "prefer search_documents. Returns pages with filenames and page numbers."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Natural-language description of what to find"},
+                "limit": {"type": "integer", "description": "Max pages (default 8)"},
             },
             "required": ["query"],
         },
@@ -174,6 +195,35 @@ def _search_documents(conn: sqlite3.Connection, query: str, limit: int = 10) -> 
     return "\n".join(lines)
 
 
+_semantic_index: "embeddings.SemanticIndex | None" = None
+
+
+def _semantic_search(conn: sqlite3.Connection, query: str, limit: int = 8) -> str:
+    global _semantic_index
+    if _semantic_index is None:
+        _semantic_index = embeddings.SemanticIndex(conn)
+    if not len(_semantic_index):
+        return ("Semantic index not built yet — it is unavailable. "
+                "Use search_documents instead. (Operator: run --mode embed.)")
+    hits = _semantic_index.search(query, min(limit, 20))
+    placeholders = ",".join("?" * len(hits))
+    rows = conn.execute(
+        f"""
+        SELECT p.page_id, d.filename, p.page_number, substr(p.page_text, 1, 240)
+        FROM pages p JOIN documents d ON d.document_id = p.document_id
+        WHERE p.page_id IN ({placeholders})
+        """,
+        [page_id for page_id, _ in hits],
+    ).fetchall()
+    by_id = {row[0]: row for row in rows}
+    lines = [f"{len(hits)} semantically similar pages for '{query}':"]
+    for page_id, score in hits:
+        _, filename, page_number, excerpt = by_id[page_id]
+        excerpt = " ".join(excerpt.split())
+        lines.append(f"- {filename} p. {page_number} (score {score:.2f}): {excerpt}...")
+    return "\n".join(lines)
+
+
 def _find_pages(conn: sqlite3.Connection, filename: str, term: str) -> str:
     like = f"%{term}%"
     cursor = conn.execute(
@@ -231,6 +281,8 @@ def _execute_tool(conn: sqlite3.Connection, name: str, tool_input: dict) -> tupl
     try:
         if name == "search_documents":
             return _search_documents(conn, tool_input["query"], tool_input.get("limit", 10)), False
+        if name == "semantic_search":
+            return _semantic_search(conn, tool_input["query"], tool_input.get("limit", 8)), False
         if name == "find_pages":
             return _find_pages(conn, tool_input["filename"], tool_input["term"]), False
         if name == "read_pages":
@@ -239,6 +291,9 @@ def _execute_tool(conn: sqlite3.Connection, name: str, tool_input: dict) -> tupl
     except sqlite3.OperationalError as e:
         # Bad FTS5 syntax etc. — hand the error back so the model can rephrase.
         return f"Query error: {e}", True
+    except requests.RequestException as e:
+        # Embedding server unreachable — tell the model to fall back to FTS.
+        return f"semantic_search unavailable (embedding server error: {e}). Use search_documents.", True
 
 
 def stream_turn(client, conn: sqlite3.Connection, messages: list):

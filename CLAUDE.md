@@ -55,6 +55,10 @@ python src/main.py --mode search --query "flight logs" --limit 50
 python src/main.py --mode chat                     # CLI chat REPL (default: Claude, needs ANTHROPIC_API_KEY)
 uvicorn --app-dir src api.rag_server:app --port 8000   # SSE API for the front_end rag-chat page
 
+# Semantic index (one-time, resumable; needs ollama + nomic-embed-text):
+python src/main.py --mode embed                    # embeds all pages -> page_embeddings table
+# Adds a semantic_search tool to the chat; env: RAG_EMBED_MODEL, RAG_EMBED_URL
+
 # Open-source model via any OpenAI-compatible server (Ollama, vLLM, LM Studio):
 #   ollama serve && ollama pull qwen3:8b
 #   RAG_PROVIDER=openai python src/main.py --mode chat

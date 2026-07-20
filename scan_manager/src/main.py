@@ -8,7 +8,7 @@ def main():
     parser = argparse.ArgumentParser(description="Make ocr scan and tokenize docs and improve quality through a round trip strategy")
     parser.add_argument(
         "--mode",
-        choices=["scan", "scan_exclude", "scan_include", "round_trip", "ingest", "search", "chat"],
+        choices=["scan", "scan_exclude", "scan_include", "round_trip", "ingest", "search", "chat", "embed"],
         required=True,
         help="Choose the document parser mode"
     )
@@ -29,6 +29,10 @@ def main():
     elif args.mode == "chat":
         from core.rag import chat_cli
         chat_cli("./data/epstein.db")
+        return
+    elif args.mode == "embed":
+        from core.embeddings import build_index
+        build_index("./data/epstein.db")
         return
     elif args.mode == "scan":
         process_dir("./data/input/","./data/output/")
