@@ -131,6 +131,38 @@ const formatDate = (value: string) => {
 };
 
 const sourceLabel = (source: string) => SOURCE_LABELS[source] || source.toUpperCase();
+const csvField = (value: string | number | null | undefined) =>
+  "\"" + String(value ?? "").replace(/"/g, "\"\"") + "\"";
+
+const buildCsv = (rows: ResultItem[]) => {
+  const headers = ["document_id", "filename", "source", "source_label", "page_count", "created_at", "score"];
+  const body = rows.map((item) =>
+    [
+      item.document_id,
+      item.filename,
+      item.source,
+      sourceLabel(item.source),
+      item.page_count,
+      item.created_at,
+      typeof item.score === "number" ? item.score : "",
+    ]
+      .map(csvField)
+      .join(",")
+  );
+
+  return [headers.map(csvField).join(","), ...body].join("\n");
+};
+
+const timestampForFilename = (date: Date) =>
+  [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+    String(date.getHours()).padStart(2, "0"),
+    String(date.getMinutes()).padStart(2, "0"),
+    String(date.getSeconds()).padStart(2, "0"),
+  ].join("-");
+
 
 const renderApiSnippet = (snippet: string) => {
   if (!snippet) {
@@ -329,6 +361,23 @@ const SearchEngineQueryClient: React.FC = () => {
   const handleNextResults = () => {
     void loadResults(mode, resultOffset + resultLimit);
   };
+  const handleExportCsv = () => {
+    if (results.length === 0 || typeof window === "undefined") {
+      return;
+    }
+
+    const csv = buildCsv(results);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `eps-document-results-${timestampForFilename(new Date())}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
 
   const handlePageJump = () => {
     const requestedPage = parseNonNegativeInt(pageJump, activePageNumber);
@@ -544,7 +593,7 @@ const SearchEngineQueryClient: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 text-sm dark:border-slate-700">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3 text-sm dark:border-slate-700">
             <button
               type="button"
               onClick={handlePreviousResults}
@@ -554,6 +603,14 @@ const SearchEngineQueryClient: React.FC = () => {
               Previous
             </button>
             <span className="text-slate-500 dark:text-slate-300">Offset {resultOffset}</span>
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              disabled={results.length === 0}
+              className="rounded-md border border-slate-300 px-3 py-1.5 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-200"
+            >
+              Export CSV
+            </button>
             <button
               type="button"
               onClick={handleNextResults}
