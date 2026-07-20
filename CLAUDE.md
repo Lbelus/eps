@@ -51,6 +51,10 @@ python src/main.py --mode ingest --workers 2       # Limit parallel OCR workers
 python src/main.py --mode search --query "grand jury"          # Full-text search
 python src/main.py --mode search --query "flight logs" --limit 50
 
+# --- Conversational RAG (Claude over the FTS5 index) ---
+python src/main.py --mode chat                     # CLI chat REPL (needs ANTHROPIC_API_KEY)
+uvicorn --app-dir src api.rag_server:app --port 8000   # SSE API for the front_end rag-chat page
+
 # --- Legacy token pipeline ---
 python src/main.py --mode scan                     # Full pipeline: OCR → tokenize → CSV
 python src/main.py --mode scan_exclude             # OCR only files NOT already in CSV
