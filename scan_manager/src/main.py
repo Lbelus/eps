@@ -8,7 +8,7 @@ def main():
     parser = argparse.ArgumentParser(description="Make ocr scan and tokenize docs and improve quality through a round trip strategy")
     parser.add_argument(
         "--mode",
-        choices=["scan", "scan_exclude", "scan_include", "round_trip", "ingest", "search"],
+        choices=["scan", "scan_exclude", "scan_include", "round_trip", "ingest", "search", "chat"],
         required=True,
         help="Choose the document parser mode"
     )
@@ -25,6 +25,10 @@ def main():
             parser.error("--query is required for search mode")
         from core.search import search_cli
         search_cli("./data/epstein.db", args.query, args.limit)
+        return
+    elif args.mode == "chat":
+        from core.rag import chat_cli
+        chat_cli("./data/epstein.db")
         return
     elif args.mode == "scan":
         process_dir("./data/input/","./data/output/")
