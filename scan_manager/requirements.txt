@@ -14,3 +14,4 @@ rapidfuzz==3.14.3
 requests>=2.32.0
 setuptools==82.0.0
 uvicorn[standard]>=0.51.0
+pytest>=9.0

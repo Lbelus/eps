@@ -102,7 +102,10 @@ class SemanticIndex:
     """In-memory cosine search over the page_embeddings table."""
 
     def __init__(self, conn: sqlite3.Connection):
-        rows = conn.execute("SELECT page_id, embedding FROM page_embeddings").fetchall()
+        try:
+            rows = conn.execute("SELECT page_id, embedding FROM page_embeddings").fetchall()
+        except sqlite3.OperationalError:
+            rows = []  # index never built — behave as empty so callers fall back to FTS
         self.page_ids = np.array([r[0] for r in rows], dtype=np.int64)
         if rows:
             self.matrix = np.frombuffer(b"".join(r[1] for r in rows), dtype=np.float32).reshape(len(rows), -1)
