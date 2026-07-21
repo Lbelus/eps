@@ -6,6 +6,7 @@ The `front_end` package is the Next.js web interface for EPS, the Epstein Paper 
 
 - Landing page for EPS.
 - Court document visualizer at `/services/search-engine`.
+- RAG chat at `/services/rag-chat` — conversational Q&A over the corpus with cited answers, streamed from the Python RAG API in `scan_manager/`.
 - Placeholder Matrix chat page at `/services/matrix-chat`.
 - Terms, privacy policy, and legal notice pages.
 - Runtime configuration endpoint at `/api/runtime-config`.
@@ -180,6 +181,19 @@ front_end/
 - Inspect document metadata.
 
 Snippets from the API mark highlighted matches with `>>>` and `<<<`; the UI renders those markers as highlighted text.
+
+## RAG Chat Page Behavior
+
+`/services/rag-chat` streams answers over SSE from the Python RAG API
+(`scan_manager/src/api/rag_server.py`, default `http://localhost:8000`,
+override with `NEXT_PUBLIC_RAG_API_URL`). The page:
+
+- Streams the answer text token-by-token as it generates.
+- Shows each retrieval step (document search, page lookup, page reads) as chips above the answer.
+- Keeps a server-side session so follow-up questions retain context.
+- Resets the conversation via the "New conversation" button.
+
+Start the RAG API first (see `scan_manager/README.md` → Conversational RAG chat); the page reports a connection error if it is unreachable.
 
 ## Production Checklist
 

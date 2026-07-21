@@ -16,8 +16,11 @@ graph TD
 
     CR --> PDF["data/input/ (PDFs)"]
     PDF --> OCR["Ingest Pipeline (Tesseract OCR x4 workers)"]
-    OCR --> DB[("epstein.db (SQLite + FTS5)")]
+    OCR --> DB[("epstein.db (SQLite + FTS5 + page embeddings)")]
     DB --> SEARCH["Full-Text Search CLI"]
+    DB --> RAG["RAG Chat (Claude or local LLM via Ollama)"]
+    RAG --> RAGAPI["FastAPI SSE server :8000"]
+    RAGAPI --> FE["front_end /services/rag-chat"]
 
     PDF --> LEGACY["Legacy Pipeline (OCR → tokenize → CSV)"]
     LEGACY --> JSON["data/json/"]
@@ -32,7 +35,7 @@ graph TD
     classDef db fill:#fff3e0,stroke:#fb8c00,stroke-width:2px,color:#000;
 
     class S1,S2,S3 source;
-    class CR,OCR,LEGACY,SEARCH process;
+    class CR,OCR,LEGACY,SEARCH,RAG,RAGAPI,FE process;
     class PDF,JSON,CSV storage;
     class DB,MYSQL db;
 ```
@@ -45,9 +48,15 @@ graph TD
 cd scan_manager
 python -m venv .venv
 source .venv/bin/activate
-pip install pyyaml pdf2image pytesseract pillow beautifulsoup4 rapidfuzz requests playwright
+pip install -r requirements.txt
 playwright install chromium
 ```
+
+For the RAG chat, one of:
+- **Claude backend** (default): export `ANTHROPIC_API_KEY`
+- **Open-source backend**: [Ollama](https://ollama.com) — `brew install ollama`, then `ollama pull qwen3:8b`
+
+For semantic search (optional): `ollama pull nomic-embed-text`
 
 **System dependencies** (macOS):
 ```bash
@@ -94,7 +103,66 @@ python src/main.py --mode search --query "flight logs" --limit 50
 
 Full-text search with FTS5 snippet highlighting.
 
-### 4. Legacy pipeline (token extraction)
+### 4. Conversational RAG chat
+
+An LLM answers questions about the corpus by driving retrieval itself: it
+searches the index, locates and reads the relevant pages, and answers with
+`(filename, p. N)` citations. Conversation history is kept, so follow-up
+questions work.
+
+```bash
+python src/main.py --mode chat                          # CLI REPL (Claude backend)
+RAG_PROVIDER=openai python src/main.py --mode chat      # local model via Ollama
+
+# Web UI: start the SSE API, then the front_end dev server
+uvicorn --app-dir src api.rag_server:app --port 8000
+# cd ../front_end && npm run dev  →  http://localhost:3000/services/rag-chat
+```
+
+**Retrieval tools available to the model:** `search_documents` (FTS5 keyword),
+`semantic_search` (vector similarity — see below), `find_pages` (locate a term
+inside one document), `read_pages` (full OCR text of specific pages).
+
+**Semantic index** (optional but recommended — recall for paraphrased/conceptual
+queries that keyword search misses):
+
+```bash
+OLLAMA_CONTEXT_LENGTH=16384 ollama serve    # in another terminal
+python src/main.py --mode embed             # one-time, resumable; ~1 hr for 110k pages
+```
+
+Embeds every substantial page with `nomic-embed-text` into a `page_embeddings`
+table (~330 MB). The chat degrades gracefully without it. Note: query embedding
+goes through Ollama, so `semantic_search` needs Ollama running even on the
+Claude backend.
+
+**Configuration (env vars):**
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `RAG_PROVIDER` | `anthropic` | `anthropic` (Claude) or `openai` (any OpenAI-compatible server: Ollama, vLLM, LM Studio) |
+| `RAG_MODEL` | `claude-opus-4-8` / `qwen3:8b` | Model ID (default depends on provider) |
+| `RAG_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible server URL (`openai` provider) |
+| `RAG_API_KEY` | `ollama` | API key for that server (local servers ignore it) |
+| `RAG_REASONING` | `none` | Reasoning effort for open models (`none`/`low`/`medium`/`high`). Hidden reasoning dominates local latency — `none` is ~12x faster on qwen3:8b |
+| `RAG_FORCE_SEARCH` | `1` | Client-enforced search-before-answer (small models otherwise fabricate citations) |
+| `RAG_TEMPERATURE` | `0.2` | Sampling temperature (`openai` provider); low = reliable tool calling |
+| `RAG_EMBED_MODEL` | `nomic-embed-text` | Embedding model for the semantic index |
+| `RAG_EMBED_URL` | `http://localhost:11434` | Ollama URL for embeddings |
+
+**RAG API endpoints** (`src/api/rag_server.py`, port 8000):
+
+```
+POST   /rag/chat              {"message": "...", "session_id": "..."}  → SSE stream
+GET    /rag/health            corpus size + active provider/model
+DELETE /rag/session/{id}      drop a conversation
+```
+
+The SSE stream emits `{"type": "session"|"text"|"tool"|"done"|"error", ...}`
+events. Sessions are in-memory (lost on restart) and the API has no auth —
+local dev only.
+
+### 5. Legacy pipeline (token extraction)
 
 ```bash
 python src/main.py --mode scan           # Full: OCR → tokenize → CSV
@@ -145,6 +213,17 @@ WHERE documents_fts MATCH 'Maxwell AND deposition'
 ORDER BY rank
 LIMIT 20;
 ```
+
+#### `page_embeddings` (semantic index, built by `--mode embed`)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `page_id` | INTEGER | PK, FK → `pages.page_id` |
+| `embedding` | BLOB | L2-normalized float32 vector (768-dim, `nomic-embed-text`) |
+
+Searched by brute-force cosine similarity in memory (`core/embeddings.py`) —
+~110k vectors is tens of milliseconds, no vector-DB dependency. Pages under
+50 chars (blank/garbage OCR) are skipped.
 
 #### Indexes
 
@@ -247,6 +326,27 @@ scan_manager/
 │   │   └── scan_manager.py     # Legacy pipeline orchestration
 │   └── main.py                 # CLI entry point
 ```
+
+---
+
+## Testing
+
+```bash
+.venv/bin/pytest            # 44 tests, ~1.5s, fully offline
+```
+
+No Ollama, Anthropic key, or network needed: database/retrieval tools run
+against a small fixture corpus (`tests/conftest.py`), the OpenAI agent loop
+runs against a fake streaming client, embeddings are faked deterministically,
+and the FastAPI server is tested with the turn generator stubbed.
+
+| File | Covers |
+|------|--------|
+| `tests/test_database.py` | Schema, ingest bookkeeping, FTS5 search + trigger sync |
+| `tests/test_rag_tools.py` | The four retrieval tools, tool dispatch/error paths, `<think>` filter |
+| `tests/test_openai_loop.py` | Streamed tool-call assembly, forced search, discard-and-nudge retry for ungrounded answers |
+| `tests/test_embeddings.py` | Semantic index build (resumable), cosine ranking, graceful empty-index fallback |
+| `tests/test_rag_server.py` | SSE event stream, session continuity, busy-lock 409, error rollback |
 
 ---
 
