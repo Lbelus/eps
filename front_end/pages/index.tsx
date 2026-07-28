@@ -54,6 +54,16 @@ export default function Home() {
             The platform provides a single interface to search filings, review documents, and navigate case
             materials with speed and clarity.
           </p>
+          <div className="mx-auto mb-8 grid max-w-2xl grid-cols-2 gap-3 text-left sm:gap-4">
+            <div className="rounded-lg border border-slate-200 bg-white/80 px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+              <p className="text-sm font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Documents</p>
+              <p className="mt-1 text-2xl font-bold text-slate-950 dark:text-white">345,494</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white/80 px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+              <p className="text-sm font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Pages</p>
+              <p className="mt-1 text-2xl font-bold text-slate-950 dark:text-white">613,880</p>
+            </div>
+          </div>
           <HeroLogIn />
           <div className="mt-10" id="services">
             <h2 className="text-2xl font-semibold mb-6 text-slate-900">Available services</h2>

@@ -11,6 +11,18 @@ type ChangelogEntry = {
 
 const entries: ChangelogEntry[] = [
   {
+    date: "2026-07-28",
+    title: "Corpus snapshot expanded to dataset 9",
+    description:
+      "The compressed SQLite corpus snapshot was refreshed to 345,494 documents and 613,880 pages, adding the latest torrent dataset to the searchable archive.",
+  },
+  {
+    date: "2026-07-25",
+    title: "Corpus snapshot expanded with datasets 6, 7, and 8",
+    description:
+      "The compressed SQLite corpus snapshot was refreshed to 15,274 documents and 153,381 pages after ingesting the next public data batches.",
+  },
+  {
     date: "2026-07-20",
     title: "Current-page CSV export",
     description:
