@@ -53,6 +53,20 @@ rest_api_backup_db()
       > db_backup$(date +%Y%m%d_%H%M%S).sql
 }
 
+
+rest_api_check_db()
+{
+    _eps_warn_default_creds
+
+    sudo docker exec mysqlserver sh -c \
+      'mysql \
+        -u root \
+        -p"${MYSQL_ROOT_PASSWORD:-your_root_password}" \
+        "${MYSQL_DATABASE:-test_rest_DB}" \
+        -e "SELECT COUNT(*) AS documents_count FROM pages;"'
+}
+
+
 rest_api_restore_db()
 {
     db_name=$1
