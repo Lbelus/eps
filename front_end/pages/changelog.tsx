@@ -11,16 +11,22 @@ type ChangelogEntry = {
 
 const entries: ChangelogEntry[] = [
   {
-    date: "2026-07-28",
-    title: "Corpus snapshot expanded to dataset 11",
+    date: "2026-08-06",
+    title: "Corpus snapshot expanded after blind OCR pass",
     description:
-      "The compressed SQLite corpus snapshot was refreshed to 345,494 documents and 613,880 pages, adding the latest torrent dataset to the searchable archive. Data 9 and 10 might have CSAM content, we are suspending OCR until further notice",
+      "The compressed SQLite corpus snapshot was refreshed to 599,002 documents and 1,388,959 pages after OCR processing the available source files.",
+  },
+  {
+    date: "2026-07-28",
+    title: "Corpus snapshot expanded after OCR refresh",
+    description:
+      "The compressed SQLite corpus snapshot was refreshed to 345,494 documents and 613,880 pages, expanding the searchable archive from newly processed source files.",
   },
   {
     date: "2026-07-25",
-    title: "Corpus snapshot expanded with datasets 6, 7, and 8",
+    title: "Corpus snapshot expanded with additional OCR output",
     description:
-      "The compressed SQLite corpus snapshot was refreshed to 15,274 documents and 153,381 pages after ingesting the next public data batches.",
+      "The compressed SQLite corpus snapshot was refreshed to 15,274 documents and 153,381 pages after ingesting additional OCR output.",
   },
   {
     date: "2026-07-20",
