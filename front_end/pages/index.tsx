@@ -57,11 +57,11 @@ export default function Home() {
           <div className="mx-auto mb-8 grid max-w-2xl grid-cols-2 gap-3 text-left sm:gap-4">
             <div className="rounded-lg border border-slate-200 bg-white/80 px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-900">
               <p className="text-sm font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Documents</p>
-              <p className="mt-1 text-2xl font-bold text-slate-950 dark:text-white">345,494</p>
+              <p className="mt-1 text-2xl font-bold text-slate-950 dark:text-white">599,002</p>
             </div>
             <div className="rounded-lg border border-slate-200 bg-white/80 px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-900">
               <p className="text-sm font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Pages</p>
-              <p className="mt-1 text-2xl font-bold text-slate-950 dark:text-white">613,880</p>
+              <p className="mt-1 text-2xl font-bold text-slate-950 dark:text-white">1,388,959</p>
             </div>
           </div>
           <HeroLogIn />
