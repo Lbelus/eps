@@ -1,4 +1,4 @@
-#include <my_redis_client.hpp>
+#include <rest_api/redis_client.hpp>
 
 namespace redis_client
 {
@@ -35,7 +35,7 @@ namespace redis_client
     void RedisClient::connection_opt(const std::string& address)
     {
         splitHostAndPort(address, host, port);
-        redisOptions opt = {0};
+        redisOptions opt = {};
         REDIS_OPTIONS_SET_TCP(&opt, host.c_str(), port);
         opt.options |= REDIS_OPT_PREFER_IPV4;
         context = redisConnectWithOptions(&opt);

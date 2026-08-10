@@ -1,5 +1,5 @@
-#ifndef MY_REDIS_CLIENT_
-#define MY_REDIS_CLIENT_
+#ifndef MY_REDIS_CPOOL_H
+#define MY_REDIS_CPOOL_H
 
 #include <string>
 #include <hiredis/hiredis.h>
@@ -7,6 +7,11 @@
 #include <memory>
 #include <iostream>
 #include <vector>
+#include <mysql++/beemutex.h>
+#include <list>
+#include <assert.h>
+#include <ctime>
+#include <algorithm>
 
 namespace redis_client
 {
@@ -17,16 +22,14 @@ namespace redis_client
 
     class RedisClient
     {
-    Threadpool Tp;
-     vate:
       redisContext* context;
       std::string host;
       int port;
 
-      int getAdressType(const std::string& address);
-      void connection(const std::string& address);
-      void connection_opt(const std::string& address);
-      void splitHostAndPort(const std::string& input, std::string& host, int& port);
+      int   getAdressType(const std::string& address);
+      void  connection(const std::string& address);
+      void  connection_opt(const std::string& address);
+      void  splitHostAndPort(const std::string& input, std::string& host, int& port);
  
       std::string concatenate()
       {
@@ -39,188 +42,113 @@ namespace redis_client
                 return first + concatenate(args...);
             }
 
-        public:
-            RedisClient(const std::string& address)
+    public:
+        RedisClient(const std::string& address)
+        {
+            if (getAdressType(address) == TCP_ADDR)
             {
-                if (getAdressType(address) == TCP_ADDR)
-                {
-                    connection_opt(address);
-                }
-                else if (getAdressType(address) == IP_ADDR)
-                {
-                    connection(address);
-                }
+                connection_opt(address);
             }
+            else if (getAdressType(address) == IP_ADDR)
+            {
+                connection(address);
+            }
+        }
 
 // KEY/VALUES
-            std::string set(const char* key, const char* value);
-            std::string get(const char* key);
-            std::vector<std::string> keys(const char *pattern);
-            std::string type(const char* key);
-            std::string del(const char* key);
-            std::string unlink(const char* key);
-            std::string expire(const char* key, int seconds);
-            std::string rename(const char *old_key, const char *new_key);
+        std::string set(const char* key, const char* value);
+        std::string get(const char* key);
+        std::vector<std::string> keys(const char *pattern);
+        std::string type(const char* key);
+        std::string del(const char* key);
+        std::string unlink(const char* key);
+        std::string expire(const char* key, int seconds);
+        std::string rename(const char *old_key, const char *new_key);
 //LISTS
-            std::string lpush(const char* key, const char* value);
-            std::string rpush(const char* key, const char* value);
-            std::string lpop(const char* key);
-            std::string rpop(const char* key);
-            std::string llen(const char* key);
-            std::string lrem(const char* key, int count, const char *element);
-            std::string lindex(const char* key, int index);
-            std::string lset(const char* key, int index, const char* value);
+        std::string lpush(const char* key, const char* value);
+        std::string rpush(const char* key, const char* value);
+        std::string lpop(const char* key);
+        std::string rpop(const char* key);
+        std::string llen(const char* key);
+        std::string lrem(const char* key, int count, const char *element);
+        std::string lindex(const char* key, int index);
+        std::string lset(const char* key, int index, const char* value);
 
 //HASHES
-            std::string hget(const char* key, const char* field);
-            std::string hexists(const char* key, const char* field);
-            std::string hmset(const char* key, const char** fields, const char** values, size_t fieldCount);
-            std::string hdel(const char* key, const char* field);
-            std::string hset(const char* key, const char* field, const char* value);
-            std::vector<std::string> hvals(const char* key);
-            std::vector<std::pair<std::string, std::string>> hgetall(const char* key);
-            std::vector<std::string> hkeys(const char* key);
-            std::string hlen(const char* key);
+        std::string hget(const char* key, const char* field);
+        std::string hexists(const char* key, const char* field);
+        std::string hmset(const char* key, const char** fields, const char** values, size_t fieldCount);
+        std::string hdel(const char* key, const char* field);
+        std::string hset(const char* key, const char* field, const char* value);
+        std::vector<std::string> hvals(const char* key);
+        std::vector<std::pair<std::string, std::string>> hgetall(const char* key);
+        std::vector<std::string> hkeys(const char* key);
+        std::string hlen(const char* key);
 
 //common
-            std::string echo(const char* message);
-            std::string ping();
-            std::string flushall();
-            std::string info(const char* section = nullptr);
+        std::string echo(const char* message);
+        std::string ping();
+        std::string flushall();
+        std::string info(const char* section = nullptr);
 
-            ~RedisClient()
-            {
-                if (context)
-                {   
-                    redisFree(context);
-                }
+        ~RedisClient()
+        {
+            if (context)
+            {   
+                redisFree(context);
             }
+        }
     };
 };
 
+template <typename ConnInfoT>
+class TooOld
+{
+public:
+    using argument_type = ConnInfoT;
+    using result_type = bool;
 
-// unsigned int GetThreadCount(unsigned int divBy);
-// using Task = std::function<void()>;
+    explicit TooOld(unsigned int tmax)
+    : min_age_(std::time(nullptr) - tmax)
+    {
+    }
 
-// class ThreadPool
-// {
-//     private:
-//         std::vector<std::thread> workers;
-//         std::queue<Task> tasks;
-//         std::mutex mutex;
-//         bool stop = false;
+    bool operator()(const ConnInfoT& conn_info) const
+    {
+        return !conn_info.in_use &&
+        conn_info.last_used <= min_age_;
+    }
 
-//     public:
-//     ThreadPool(unsigned int nbThread)
-//     {
-//         unsigned int index = 0;
-//         while (index < nbThread)
-//         {
-//             workers.emplace_back(&ThreadPool::workerFunction, this);
-//             index += 1;
-//         }
-//     }
+private:
+    std::time_t min_age_;
+};
 
-
-//     void enqueue(Task task) 
-//     {
-//         std::lock_guard<std::mutex> lock(mutex);
-//         tasks.push(task);
-//     }
-
-
-//     void workerFunction()
-//     {
-//         while (!stop)
-//         {
-//             Task task;
-//             {
-//                 std::lock_guard<std::mutex> lock(mutex);
-//                 if (tasks.empty()) 
-//                 {
-//                     continue;
-//                 }
-//                 task = tasks.front();
-//                 tasks.pop();
-//             }
-//             task();
-//         }
-//     }
-// };
-
-
-// class clientMov: public my_redis::RedisClient
-// {
-// private:
-//     redisContext* context;
-//     std::string host;
-//     int port;
-
-// public:
-//     clientMov(const std::string& address) : RedisClient(address), context(nullptr), host(""), port(0) {}
-
-//     clientMov(clientMov&& other) noexcept : RedisClient(std::move(other)), context(other.context), host(std::move(other.host)), port(other.port) 
-// {
-//         other.context = nullptr;
-//     }
-
-//     clientMov& operator=(clientMov&& other) noexcept
-//     {
-//         if (this != &other) 
-//         {
-//             RedisClient::operator=(std::move(other));
-//             
-//             if (context)
-//             {   
-//                 redisFree(context);
-//             }
-//             context = other.context;
-//             other.context = nullptr;
-//             host = std::move(other.host);
-//             port = other.port;
-//         }
-//         return *this;
-//     }
-
-//     ~clientMov() 
-//     {
-//         if (context)
-//         {   
-//             redisFree(context);
-//         }
-//     }
-// };
-
-
-// void redisTask(std::string)
-// {
-//     std::shared_ptr<redis_client::RedisClient> shared_redis_conn;
-// }
 
 class redis_conn_pool
 {
+public:
+    using Connection = redis_client::RedisClient;
+    using unique_conn_t = std::unique_ptr<Connection>;
+
 private:
-    using redis_client::RedisClient = Connection;
-    using std::unique_ptr<Connection> = unique_conn_t;
-    idle_time = 3;
     
     struct connection_info_s
     {
         unique_conn_t conn;
-        time_t last_used;
+        std::time_t last_used;
         bool in_use;
         
-        connection_info_t(unique_conn_t conn_) :
+        connection_info_s(Connection* conn_) :
         conn(conn_),
         last_used(time(0)),
         in_use(true)
         {}
-        bool operator<(const connection_info_s rhs) const
+        bool operator<(const connection_info_s& rhs) const
         {
             const connection_info_s& lhs = *this;
             if (lhs.in_use == rhs.in_use)
             {
-                return lsh.last_used < rhs.last_used;
+                return lhs.last_used < rhs.last_used;
             }
             else
             {
@@ -229,53 +157,143 @@ private:
         }
     };
     typedef connection_info_s ConnectionInfo;
-    typedef std::list<ConnectionInfo> poolList;
-    typedef poolList::iterator poolIt
+    typedef std::list<ConnectionInfo> PoolList;
+    typedef PoolList::iterator PoolIt;
 
-public:
-    redis_conn_pool(const std::string& address) :
+    Connection* find_mru()
     {
-        unsigned int count = 0;
-        while (count < min_con)
+        PoolIt mru = std::max_element(pool_.begin(), pool_.end());
+        if (mru != pool_.end() && !mru->in_use)
         {
-            unique_conn_t redis_client::RedisClient rc(address);
-            conn_vec.push_back(rc);
-            count += 1;
+            mru->in_use = true;
+            return mru->conn.get();
+        }
+        else
+        {
+            return nullptr;
         }
     }
-    std::unique_ptr<redis_client::RedisClient> acquire()
+
+    void remove(const PoolIt& it)
     {
-        conns_in_use += 1;
-        return conn_vec.pop_back();
+        it->conn.reset();
+        pool_.erase(it);
     }
-    unique_conn_t exchange();
-    unique_conn_t grab();
-    void release();
-    void shrink();
-    void destroy();
-    unsigned int max_idle_time() = 0;
+
+
+    void remove_old_connections()
+    {
+	    TooOld<ConnectionInfo> too_old(max_idle_time());
+
+	    PoolIt it = pool_.begin();
+	    while ((it = std::find_if(it, pool_.end(), too_old)) != pool_.end())
+        {
+		    remove(it++);
+	    }
+    } 
+
+    PoolList pool_;
+    mysqlpp::BeecryptMutex mutex_;
+
+public:
+    redis_conn_pool(){}
+    virtual ~redis_conn_pool()
+    {
+        assert(empty());
+    }
+
+    bool empty() const
+    {
+        return pool_.empty();
+    }
+
+    virtual Connection* exchange(const Connection* pool_conn)
+    {
+        remove(pool_conn);
+        return grab();
+    }
+
+    virtual Connection* grab()
+    {
+        mysqlpp::ScopedLock lock(mutex_);
+        remove_old_connections();
+        if (Connection* mru = find_mru()) 
+        {
+            return mru;
+        }
+        else
+        {
+            pool_.push_back(ConnectionInfo(create()));
+            return pool_.back().conn.get();
+        }
+        return nullptr;
+    }
+
+    virtual void release(const Connection* pool_conn)
+    {
+        mysqlpp::ScopedLock lock(mutex_);
+        for (PoolIt it = pool_.begin(); it != pool_.end(); ++it)
+        {
+            if (it->conn.get() == pool_conn)
+            {
+                it->in_use = false;
+                it->last_used = time(0);
+                break;
+            }
+        }
+    }
+
+    void remove(const Connection* pool_conn)
+    {
+        mysqlpp::ScopedLock lock(mutex_);
+        for (PoolIt it = pool_.begin(); it != pool_.end(); ++it)
+        {
+            if (it->conn.get() == pool_conn)
+            {
+                remove(it);
+                return;
+            }
+        } 
+    }
+    virtual Connection* safe_grab()
+    {
+        Connection* pool_conn;
+        while (!(pool_conn = grab())->ping().c_str())
+        {
+            remove(pool_conn);
+            pool_conn = nullptr;
+        }
+        return pool_conn;
+    }
+    void shrink()
+    {
+        clear(false);
+    }
+
+protected:
+
+    void clear(bool all = true)
+    {
+        mysqlpp::ScopedLock lock(mutex_);
+        PoolIt it = pool_.begin();
+        while (it != pool_.end())
+        {
+            if (all == true || !it->in_use)
+            {
+                remove(it++);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
+    virtual Connection* create() = 0;
+    virtual void destroy(Connection*) = 0;
+    virtual unsigned int max_idle_time() = 0;
     size_t size() const
     {
         return pool_.size();
-    }
-
-    void clear()
-    {
-// here lies some lock to prevent the app to use a conn_ at the same time. 
-        for (std::vector<unique_conn_t>::iterator it = conn_vec.begin(); it != conn_vec.end();)
-        {
-            conn_vec.erase(it);
-            ++it;
-        } 
-    }
-
-    ~redis_conn_pool()
-    {
-        for (std::vector<unique_conn_t>::iterator it = conn_vec.begin(); it != conn_vec.end();)
-        {
-            conn_vec.erase(it);
-            ++it;
-        } 
     }
 };
 

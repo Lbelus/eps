@@ -1,4 +1,4 @@
-#include <redis_client.hpp>
+#include <rest_api/redis_client.hpp>
 
 
 namespace redis_client
@@ -149,7 +149,7 @@ namespace redis_client
         argvlen[0] = 5;
         argv[1] = key;
         argvlen[1] = strlen(key);
-        int index = 0;
+        size_t index = 0;
         while (index < fieldCount)
         {
             argv[2 + index * 2] = fields[index];
