@@ -13,6 +13,16 @@
 #include <ctime>
 #include <algorithm>
 
+#ifndef CONNECTION_STRUCT
+#define CONNECTION_STRUCT
+struct redis_connection_s
+{
+    const char* server;
+    unsigned int port;
+};
+typedef struct redis_connection_s redis_connection_t;
+#endif
+
 namespace redis_client
 {
     #define INVALID     0
@@ -27,8 +37,8 @@ namespace redis_client
       int port;
 
       int   getAdressType(const std::string& address);
-      void  connection(const std::string& address);
-      void  connection_opt(const std::string& address);
+      void  connection(const std::string& host, int port);
+      void  connection_opt(const std::string& host, int port);
       void  splitHostAndPort(const std::string& input, std::string& host, int& port);
  
       std::string concatenate()
@@ -43,15 +53,16 @@ namespace redis_client
             }
 
     public:
-        RedisClient(const std::string& address)
+        RedisClient(const std::string& host, int port): host(host),
+        port(port)
         {
-            if (getAdressType(address) == TCP_ADDR)
+            if (getAdressType(host) == TCP_ADDR)
             {
-                connection_opt(address);
+                connection_opt(host, port);
             }
-            else if (getAdressType(address) == IP_ADDR)
+            else if (getAdressType(host) == IP_ADDR)
             {
-                connection(address);
+                connection(host, port);
             }
         }
 
@@ -340,6 +351,73 @@ public:
 private:
   redis_conn_pool* pool_;
   redis_conn_pool::Connection* conn_;
+};
+
+class SimpleRedisConnectionPool : public redis_conn_pool
+{
+
+public:
+	// The object's only constructor
+	explicit SimpleRedisConnectionPool(const redis_connection_t* conn_id)
+        : conns_in_use_(0),
+	      server_(conn_id->server),
+	      port_(conn_id->port)
+    {}
+	// The destructor.  We _must_ call ConnectionPool::clear() here,
+	// because our superclass can't do it for us.
+	~SimpleRedisConnectionPool()
+	{
+		clear();
+	}
+    
+    redis_conn_pool::Connection* grab() override
+    {
+        ++conns_in_use_;
+        return redis_conn_pool::grab();
+    }
+    redis_conn_pool::Connection* safe_grab() override
+    {
+        ++conns_in_use_;
+        return redis_conn_pool::safe_grab();
+    }
+    void release(const redis_conn_pool::Connection* pc) override
+    {
+        redis_conn_pool::release(pc);
+        --conns_in_use_;
+    }
+protected:
+    // Superclass overrides
+    redis_conn_pool::Connection* create() override
+    {
+        // Create connection using the parameters we were passed upon
+        // creation.  This could be something much more complex, but for
+        // the purposes of the example, this suffices.
+        std::cout.put('C'); std::cout.flush(); // indicate connection creation
+        return new redis_conn_pool::Connection(
+                server_.empty() ? 0 : server_.c_str(),
+                port_);
+    }
+
+    void destroy(redis_conn_pool::Connection* cp) override
+    {
+        // Our superclass can't know how we created the Connection, so
+        // it delegates destruction to us, to be safe.
+        std::cout.put('D'); std::cout.flush(); // indicate connection destruction
+        delete cp;
+    }
+
+    unsigned int max_idle_time() override
+    {
+        // Set our idle time at an example-friendly 3 seconds.  A real
+        // pool would return some fraction of the server's connection
+        // idle timeout instead.
+        return 3;
+    }
+private:
+
+    unsigned int conns_in_use_;
+    std::string server_;
+    unsigned int port_ = 0;
 };
 
 #endif

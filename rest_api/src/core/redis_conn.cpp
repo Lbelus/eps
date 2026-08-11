@@ -15,9 +15,9 @@ namespace redis_client
         return INVALID;
     }
 
-    void RedisClient::connection(const std::string& address)
+    void RedisClient::connection(const std::string& host, int port)
     {
-        splitHostAndPort(address, host, port);
+        // splitHostAndPort(address, host, port);
         context = redisConnect(host.c_str(), port);
         if (context == NULL || context->err)
         {
@@ -32,9 +32,9 @@ namespace redis_client
         }
     }
 
-    void RedisClient::connection_opt(const std::string& address)
+    void RedisClient::connection_opt(const std::string& host, int port)
     {
-        splitHostAndPort(address, host, port);
+        // splitHostAndPort(address, host, port);
         redisOptions opt = {};
         REDIS_OPTIONS_SET_TCP(&opt, host.c_str(), port);
         opt.options |= REDIS_OPT_PREFER_IPV4;
@@ -56,29 +56,29 @@ namespace redis_client
         }
     }
 
-    void RedisClient::splitHostAndPort(const std::string& input, std::string& host, int& port)
-    {
-        size_t protocolPos = input.find("://");
-        size_t startPos = 0;
-        if (protocolPos != std::string::npos)
-        {
-            startPos = protocolPos + 3;
-        }
-        size_t colonPos = input.find(':', startPos);
-        if (colonPos == std::string::npos)
-        {
-            throw std::invalid_argument("Input string does not contain a port separator ':'");
-        }
-        host = input.substr(startPos, colonPos - startPos);
-        std::string portStr = input.substr(colonPos + 1);
-        if (portStr.empty() || portStr.find_first_not_of("0123456789") != std::string::npos)
-        {
-            throw std::invalid_argument("Port must be a number");
-        }
-        port = std::stoi(portStr);
-        if (port < 0 || port > 65535)
-        {
-            throw std::invalid_argument("Port number is out of valid range");
-        }
-    }
+    // void RedisClient::splitHostAndPort(const std::string& input, std::string& host, int& port)
+    // {
+    //     size_t protocolPos = input.find("://");
+    //     size_t startPos = 0;
+    //     if (protocolPos != std::string::npos)
+    //     {
+    //         startPos = protocolPos + 3;
+    //     }
+    //     size_t colonPos = input.find(':', startPos);
+    //     if (colonPos == std::string::npos)
+    //     {
+    //         throw std::invalid_argument("Input string does not contain a port separator ':'");
+    //     }
+    //     host = input.substr(startPos, colonPos - startPos);
+    //     std::string portStr = input.substr(colonPos + 1);
+    //     if (portStr.empty() || portStr.find_first_not_of("0123456789") != std::string::npos)
+    //     {
+    //         throw std::invalid_argument("Port must be a number");
+    //     }
+    //     port = std::stoi(portStr);
+    //     if (port < 0 || port > 65535)
+    //     {
+    //         throw std::invalid_argument("Port number is out of valid range");
+    //     }
+    // }
 }
