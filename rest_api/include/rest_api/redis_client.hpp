@@ -297,5 +297,49 @@ protected:
     }
 };
 
+class RedisScopedConnection {
+public:
+  explicit RedisScopedConnection(redis_conn_pool& pool)
+      : pool_(&pool), conn_(pool.grab())
+  {}
+
+  ~RedisScopedConnection()
+  {
+      if (pool_ && conn_) {
+          pool_->release(conn_);
+      }
+  }
+
+  RedisScopedConnection(const RedisScopedConnection&) = delete;
+  RedisScopedConnection& operator=(const RedisScopedConnection&) = delete;
+
+  RedisScopedConnection(RedisScopedConnection&& other) noexcept
+      : pool_(other.pool_), conn_(other.conn_)
+  {
+      other.pool_ = nullptr;
+      other.conn_ = nullptr;
+  }
+
+  RedisScopedConnection& operator=(RedisScopedConnection&& other) noexcept
+  {
+      if (this != &other) {
+          if (pool_ && conn_) {
+              pool_->release(conn_);
+          }
+          pool_ = other.pool_;
+          conn_ = other.conn_;
+          other.pool_ = nullptr;
+          other.conn_ = nullptr;
+      }
+      return *this;
+  }
+
+  redis_conn_pool::Connection* operator->() { return conn_; }
+  redis_conn_pool::Connection& operator*() { return *conn_; }
+
+private:
+  redis_conn_pool* pool_;
+  redis_conn_pool::Connection* conn_;
+};
 
 #endif
