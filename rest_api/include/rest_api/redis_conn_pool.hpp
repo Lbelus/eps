@@ -135,80 +135,14 @@ private:
 };
 
 
-class redis_conn_pool
+class RedisConnectionPool
 {
 public:
     using Connection = redis_client::RedisClient;
-    using unique_conn_t = std::unique_ptr<Connection>;
+    using ConnectionPtr = std::unique_ptr<Connection>;
 
-private:
-    
-    struct connection_info_s
-    {
-        unique_conn_t conn;
-        std::time_t last_used;
-        bool in_use;
-        
-        connection_info_s(Connection* conn_) :
-        conn(conn_),
-        last_used(time(0)),
-        in_use(true)
-        {}
-        bool operator<(const connection_info_s& rhs) const
-        {
-            const connection_info_s& lhs = *this;
-            if (lhs.in_use == rhs.in_use)
-            {
-                return lhs.last_used < rhs.last_used;
-            }
-            else
-            {
-                return lhs.in_use;
-            }     
-        }
-    };
-    typedef connection_info_s ConnectionInfo;
-    typedef std::list<ConnectionInfo> PoolList;
-    typedef PoolList::iterator PoolIt;
-
-    Connection* find_mru()
-    {
-        PoolIt mru = std::max_element(pool_.begin(), pool_.end());
-        if (mru != pool_.end() && !mru->in_use)
-        {
-            mru->in_use = true;
-            return mru->conn.get();
-        }
-        else
-        {
-            return nullptr;
-        }
-    }
-
-    void remove(const PoolIt& it)
-    {
-        it->conn.reset();
-        pool_.erase(it);
-    }
-
-
-    void remove_old_connections()
-    {
-	    TooOld<ConnectionInfo> too_old(max_idle_time());
-
-	    PoolIt it = pool_.begin();
-	    while ((it = std::find_if(it, pool_.end(), too_old)) != pool_.end())
-        {
-		    remove(it++);
-	    }
-    } 
-
-    PoolList pool_;
-    mysqlpp::BeecryptMutex mutex_;
-
-public:
-    redis_conn_pool(){}
-    virtual ~redis_conn_pool()
+    RedisConnectionPool(){}
+    virtual ~RedisConnectionPool()
     {
         assert(empty());
     }
@@ -306,11 +240,77 @@ protected:
     {
         return pool_.size();
     }
+
+private:
+    
+    struct connection_info_s
+    {
+        ConnectionPtr conn;
+        std::time_t last_used;
+        bool in_use;
+        
+        connection_info_s(Connection* conn_) :
+        conn(conn_),
+        last_used(time(0)),
+        in_use(true)
+        {}
+        bool operator<(const connection_info_s& rhs) const
+        {
+            const connection_info_s& lhs = *this;
+            if (lhs.in_use == rhs.in_use)
+            {
+                return lhs.last_used < rhs.last_used;
+            }
+            else
+            {
+                return lhs.in_use;
+            }     
+        }
+    };
+
+    using ConnectionInfo = connection_info_s;
+    using PoolList = std::list<ConnectionInfo>;
+    using PoolIt = PoolList::iterator;
+
+    Connection* find_mru()
+    {
+        PoolIt mru = std::max_element(pool_.begin(), pool_.end());
+        if (mru != pool_.end() && !mru->in_use)
+        {
+            mru->in_use = true;
+            return mru->conn.get();
+        }
+        else
+        {
+            return nullptr;
+        }
+    }
+
+    void remove(const PoolIt& it)
+    {
+        it->conn.reset();
+        pool_.erase(it);
+    }
+
+
+    void remove_old_connections()
+    {
+	    TooOld<ConnectionInfo> too_old(max_idle_time());
+
+	    PoolIt it = pool_.begin();
+	    while ((it = std::find_if(it, pool_.end(), too_old)) != pool_.end())
+        {
+		    remove(it++);
+	    }
+    } 
+
+    PoolList pool_;
+    mysqlpp::BeecryptMutex mutex_;
 };
 
 class RedisScopedConnection {
 public:
-  explicit RedisScopedConnection(redis_conn_pool& pool)
+  explicit RedisScopedConnection(RedisConnectionPool& pool)
       : pool_(&pool), conn_(pool.grab())
   {}
 
@@ -345,15 +345,15 @@ public:
       return *this;
   }
 
-  redis_conn_pool::Connection* operator->() { return conn_; }
-  redis_conn_pool::Connection& operator*() { return *conn_; }
+  RedisConnectionPool::Connection* operator->() { return conn_; }
+  RedisConnectionPool::Connection& operator*() { return *conn_; }
 
 private:
-  redis_conn_pool* pool_;
-  redis_conn_pool::Connection* conn_;
+  RedisConnectionPool* pool_;
+  RedisConnectionPool::Connection* conn_;
 };
 
-class SimpleRedisConnectionPool : public redis_conn_pool
+class SimpleRedisConnectionPool : public RedisConnectionPool
 {
 
 public:
@@ -370,35 +370,35 @@ public:
 		clear();
 	}
     
-    redis_conn_pool::Connection* grab() override
+    RedisConnectionPool::Connection* grab() override
     {
         ++conns_in_use_;
-        return redis_conn_pool::grab();
+        return RedisConnectionPool::grab();
     }
-    redis_conn_pool::Connection* safe_grab() override
+    RedisConnectionPool::Connection* safe_grab() override
     {
         ++conns_in_use_;
-        return redis_conn_pool::safe_grab();
+        return RedisConnectionPool::safe_grab();
     }
-    void release(const redis_conn_pool::Connection* pc) override
+    void release(const RedisConnectionPool::Connection* pc) override
     {
-        redis_conn_pool::release(pc);
+        RedisConnectionPool::release(pc);
         --conns_in_use_;
     }
 protected:
     // Superclass overrides
-    redis_conn_pool::Connection* create() override
+    RedisConnectionPool::Connection* create() override
     {
         // Create connection using the parameters we were passed upon
         // creation.  This could be something much more complex, but for
         // the purposes of the example, this suffices.
         std::cout.put('C'); std::cout.flush(); // indicate connection creation
-        return new redis_conn_pool::Connection(
+        return new RedisConnectionPool::Connection(
                 server_.empty() ? 0 : server_.c_str(),
                 port_);
     }
 
-    void destroy(redis_conn_pool::Connection* cp) override
+    void destroy(RedisConnectionPool::Connection* cp) override
     {
         // Our superclass can't know how we created the Connection, so
         // it delegates destruction to us, to be safe.

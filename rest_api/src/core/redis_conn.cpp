@@ -1,4 +1,4 @@
-#include <rest_api/redis_client.hpp>
+#include <rest_api/redis_conn_pool.hpp>
 
 namespace redis_client
 {

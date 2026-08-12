@@ -44,6 +44,12 @@ unsigned int GetThreadCount(unsigned int divBy);
 
 // These overrides let the base class delegate operations it can’t successfully do itself to its subclass.
 
+
+
+
+
+
+
 class SimpleConnectionPool : public mysqlpp::ConnectionPool
 {
 
