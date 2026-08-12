@@ -7,6 +7,7 @@
 #include <mutex>
 #include <queue>
 #include <vector>
+#include <string>
 // #include <mysql_helpers.hpp>
 #include <crow/middlewares/cors.h>
 #include <crow.h>
@@ -23,6 +24,15 @@ struct mysql_connection_s
 };
 typedef struct mysql_connection_s mysql_connection_t;
 #endif
+
+struct mysql_pool_config_t
+{
+    std::string db;
+    std::string server;
+    std::string user;
+    std::string password;
+    unsigned int port;
+};
 
 
 unsigned int GetThreadCount(unsigned int divBy);
@@ -47,6 +57,17 @@ public:
 	      password_(conn_id->password),
           port_(conn_id->port)
 	{}
+	// The destructor.
+
+    explicit SimpleConnectionPool(const mysql_pool_config_t& config)
+        : conns_in_use_(0),
+          db_(config.db),
+          server_(config.server),
+          user_(config.user),
+          password_(config.password),
+          port_(config.port)
+    {}
+
 	// The destructor.  We _must_ call ConnectionPool::clear() here,
 	// because our superclass can't do it for us.
 	~SimpleConnectionPool()

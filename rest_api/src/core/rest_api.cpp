@@ -2,7 +2,98 @@
 #include <string.h>
 #include <crow.h>
 #include <crow/middlewares/cors.h>
-#include <rest_api/mysql_conn_pool.hpp>
+#include <rest_api/rest_api.hpp>
+#include <rest_api/route_registry.hpp>
+
+#include <cstdlib>
+#include <stdexcept>
+
+namespace
+{
+using RestApiApp = crow::App<crow::CORSHandler>;
+
+void configure_cors(RestApiApp& app, const server_config_t& config)
+{
+    auto& cors = app.get_middleware<crow::CORSHandler>();
+    cors.global()
+        .headers("Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With")
+        .methods("GET"_method, "POST"_method, "PUT"_method, "DELETE"_method, "OPTIONS"_method)
+        .origin(config.allowed_origins);
+}
+
+void bind_routes_for_db(RestApiApp& app, const db_config_t& config, IConnectionPool& pool)
+{
+    switch (config.type)
+    {
+        case DbType::MySQL:
+        {
+            auto* mysql_pool = dynamic_cast<MySqlConnectionPool*>(&pool);
+            if (mysql_pool == nullptr)
+            {
+                throw std::runtime_error("Connection pool type mismatch for MySQL config: " + config.name);
+            }
+
+            for (const auto& route_name : config.route_vec)
+            {
+                RestApiMySqlRouteRegistry::instance().bind(route_name, app, mysql_pool->pool());
+            }
+            return;
+        }
+
+        case DbType::Redis:
+            throw std::runtime_error("Redis route binding is not implemented yet: " + config.name);
+
+        case DbType::PostgreSQL:
+            throw std::runtime_error("PostgreSQL route binding is not implemented yet: " + config.name);
+
+        case DbType::unknown:
+            break;
+    }
+
+    throw std::runtime_error("Unknown database type for route binding: " + config.name);
+}
+}
+
+rest_api::rest_api(const std::string& config_file)
+    : app_config(load_config(config_file.c_str()))
+{}
+
+int rest_api::start()
+{
+    pool_reg.clear();
+
+    RestApiApp app;
+    configure_cors(app, app_config.server_config);
+
+    for (const auto& db_config : app_config.db_config_vec)
+    {
+        const ConnectionPoolRegistry::Id id = pool_reg.create_and_add(db_config);
+        IConnectionPool& pool = pool_reg.get(id);
+
+        if (!pool.connect())
+        {
+            return EXIT_FAILURE;
+        }
+
+        bind_routes_for_db(app, db_config, pool);
+    }
+
+    if (!app_config.server_config.bind_addr.empty())
+    {
+        app.bindaddr(app_config.server_config.bind_addr)
+            .port(app_config.server_config.port)
+            .multithreaded()
+            .run();
+    }
+    else
+    {
+        app.port(app_config.server_config.port)
+            .multithreaded()
+            .run();
+    }
+
+    return EXIT_SUCCESS;
+}
 
 const char* allocate_string(const char* str)
 {

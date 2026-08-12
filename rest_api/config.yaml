@@ -12,7 +12,9 @@ server:
   threads: 4
   allowed_origins: https://eps.example.com
 
-mysql:
+db:
+  name: db_MySql_00
+  type: mysql
   # host = MySQL server hostname (Docker service name when in sqlRest network).
   host: mysqlserver
   port: 3306
@@ -22,3 +24,4 @@ mysql:
   password: MYSQL_PASSWORD
   database: test_rest_DB
   pool_size: 8
+  routes: ['mysqlCourtDocuments_routes']

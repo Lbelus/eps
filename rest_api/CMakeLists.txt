@@ -162,6 +162,7 @@ if (ENABLE_SHARED)
         src/core/rest_api.cpp
         src/core/mysql_conn_pool.cpp
         src/core/config_loader.cpp
+        src/core/route_registry.cpp
     )
     set_target_properties(rest_apiLib PROPERTIES OUTPUT_NAME rest_api)
     target_compile_options(rest_apiLib PRIVATE -fPIC)

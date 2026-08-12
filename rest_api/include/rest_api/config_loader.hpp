@@ -11,19 +11,28 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <string>
+#include <vector> 
 
 #ifndef CONFIG_STRUCT
 #define CONFIG_STRUCT
-struct MySql_config_s
+// struct MySql_config_s
+// {
+//     std::string host;
+//     unsigned int port;
+//     std::string user;
+//     std::string password;
+//     std::string database;
+//     unsigned int pool_size;
+// };
+// typedef struct MySql_config_s MySql_config_t;
+
+enum class DbType
 {
-    std::string host;
-    unsigned int port;
-    std::string user;
-    std::string password;
-    std::string database;
-    unsigned int pool_size;
+    MySQL,
+    Redis,
+    PostgreSQL,
+    unknown
 };
-typedef struct MySql_config_s MySql_config_t;
 
 struct server_config_s
 {
@@ -36,15 +45,31 @@ struct server_config_s
 };
 typedef struct server_config_s server_config_t;
 
+struct db_config_s
+{
+    std::string name;
+    DbType type;
+    std::string host;
+    unsigned int port;
+    std::string user;
+    std::string password;
+    std::string database;
+    unsigned int pool_size;
+    std::vector<std::string> route_vec;
+};
+typedef struct db_config_s db_config_t;
+
 struct app_config_s
 {
-    server_config_t server;
-    MySql_config_t mysql;
+    server_config_t server_config;
+    std::vector<db_config_t> db_config_vec;
 };
 typedef struct app_config_s app_config_t;
 
 enum class string_code
 {
+    name,
+    type,
     host,
     bind_addr,
     port,
@@ -54,6 +79,7 @@ enum class string_code
     pool_size,
     threads,
     allowed_origins,
+    routes,
     unknown
 };
 #endif

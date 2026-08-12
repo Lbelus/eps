@@ -19,6 +19,7 @@
 #include <vector>
 
 #include <rest_api/mysql_conn_pool.hpp>
+#include <rest_api/route_registry.hpp>
 /*
  * GENERAL INFORMATION: 
  * 
@@ -1025,6 +1026,8 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
         return crow::response(200, MySqlCourtDocumentsRepository::to_crow_json(hits));
     });
 }
+
+REST_API_REGISTER_MYSQL_ROUTE(mysqlCourtDocuments_routes)
 
 #endif // !REPO_FAKE_ONLY
 
