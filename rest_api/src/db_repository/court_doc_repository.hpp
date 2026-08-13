@@ -950,8 +950,8 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
     CROW_ROUTE(app, "/courtdocuments/<int>").methods(crow::HTTPMethod::GET)
     ([&pool_ptr](int id)
     {
-        mysqlpp::ScopedConnection sc(pool_ptr, true);
-        CourtDocumentsRepositoryImpl repo(sc);
+        mysqlpp::MySqlScopedConnection sc(pool_ptr);
+        CourtDocumentsRepositoryImpl repo(*sc);
 
         int result = repo.get_by_id(id);
         if (result != EXIT_SUCCESS)
@@ -967,8 +967,8 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
     CROW_ROUTE(app, "/courtdocuments").methods(crow::HTTPMethod::GET)
     ([&pool_ptr](const crow::request& req)
     {
-        mysqlpp::ScopedConnection sc(pool_ptr, true);
-        CourtDocumentsRepositoryImpl repo(sc);
+        mysqlpp::MySqlScopedConnection sc(pool_ptr);
+        CourtDocumentsRepositoryImpl repo(*sc);
 
         std::size_t limit  = req.url_params.get("limit")  ? std::stoul(req.url_params.get("limit"))  : 100;
         std::size_t offset = req.url_params.get("offset") ? std::stoul(req.url_params.get("offset")) : 0;
@@ -987,8 +987,8 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
     CROW_ROUTE(app, "/courtdocuments/<int>/pages").methods(crow::HTTPMethod::GET)
     ([&pool_ptr](int document_id)
     {
-        mysqlpp::ScopedConnection sc(pool_ptr, true);
-        CourtDocumentsRepositoryImpl repo(sc);
+        mysqlpp::MySqlScopedConnection sc(pool_ptr);
+        CourtDocumentsRepositoryImpl repo(*sc);
 
         int result = repo.get_pages_by_document_id(document_id);
         if (result != EXIT_SUCCESS)
@@ -1004,8 +1004,8 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
     CROW_ROUTE(app, "/courtdocuments/search").methods(crow::HTTPMethod::GET)
     ([&pool_ptr](const crow::request& req)
     {
-        mysqlpp::ScopedConnection sc(pool_ptr, true);
-        CourtDocumentsRepositoryImpl repo(sc);
+        mysqlpp::MySqlScopedConnection sc(pool_ptr);
+        CourtDocumentsRepositoryImpl repo(*sc);
 
         const char* q = req.url_params.get("q");
         if (!q || std::string(q).empty())
