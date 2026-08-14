@@ -79,10 +79,17 @@ The document visualizer calls these endpoints:
 GET /courtdocuments?limit=&offset=
 GET /courtdocuments/<id>
 GET /courtdocuments/<id>/pages
+GET /courtdocuments/by-filename?q=...&limit=&offset=
 GET /courtdocuments/search?q=...&limit=&offset=
 ```
 
-The public `/llms.txt` file documents the same API for LLMs and crawler-like agents.
+Offsets remain available for an initial jump. After receiving a page, clients can avoid another deep offset scan by sending `direction=next|previous` with the boundary result:
+
+- Document lists use `cursor_id`.
+- Filename searches use `cursor_id` and `cursor_filename`.
+- Full-text searches use `cursor_id` and `cursor_score`.
+
+Cursor requests must reuse the same query, filters, and limit, and cannot include a nonzero offset. Existing offset-only clients remain compatible. The public `/llms.txt` file documents complete examples for LLMs and crawler-like agents.
 
 ## Development
 

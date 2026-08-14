@@ -8,10 +8,13 @@
 #include <mysql++/ssqls.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -112,6 +115,26 @@ struct court_document_search_result_s
 typedef struct court_document_search_result_s cdsr_t;
 #endif
 
+enum class pagination_direction_t
+{
+    none,
+    next,
+    previous
+};
+
+struct pagination_cursor_t
+{
+    pagination_direction_t direction {pagination_direction_t::none};
+    int document_id {};
+    double score {};
+    std::string filename;
+
+    bool active() const
+    {
+        return direction != pagination_direction_t::none;
+    }
+};
+
 // Snippet slice offsets are byte positions; nudge them forward off UTF-8
 // continuation bytes so a slice never cuts a multi-byte character in half
 // and emits invalid UTF-8 into JSON responses.
@@ -148,10 +171,10 @@ struct ICourtDocumentsRepository
     virtual ~ICourtDocumentsRepository() = default;
 
     virtual int get_by_id(int id) = 0;
-    virtual int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0) = 0;
+    virtual int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0, const pagination_cursor_t& cursor = {}) = 0;
     virtual int get_pages_by_document_id(int document_id) = 0;
-    virtual int search_fulltext(const std::string& query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0) = 0;
-    virtual int search_by_filename(const std::string& query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0) = 0;
+    virtual int search_fulltext(const std::string& query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0, const pagination_cursor_t& cursor = {}) = 0;
+    virtual int search_by_filename(const std::string& query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0, const pagination_cursor_t& cursor = {}) = 0;
     virtual const char* error() = 0;
     virtual CourtDocument get_mapped_entry() = 0;
     virtual std::vector<CourtDocument> get_mapped_entry_vector() = 0;
@@ -210,9 +233,14 @@ public:
         return EXIT_SUCCESS;
     }
 
-    int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0) override
+    int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0, const pagination_cursor_t& cursor = {}) override
     {
         clear_state();
+
+        if (cursor.active())
+        {
+            return list_all_with_cursor(limit, source_filters, min_pages, max_pages, cursor);
+        }
 
         mysqlpp::StoreQueryResult result;
         if (source_filters.empty())
@@ -272,7 +300,7 @@ public:
         return EXIT_SUCCESS;
     }
 
-    int search_by_filename(const std::string& user_query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0) override
+    int search_by_filename(const std::string& user_query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0, const pagination_cursor_t& cursor = {}) override
     {
         clear_state();
 
@@ -280,6 +308,11 @@ public:
         {
             error_msg_ = "empty filename query";
             return EXIT_FAILURE;
+        }
+
+        if (cursor.active())
+        {
+            return search_by_filename_with_cursor(user_query, limit, source_filters, min_pages, max_pages, cursor);
         }
 
         const std::string pattern = "%" + user_query + "%";
@@ -373,7 +406,7 @@ public:
         return EXIT_SUCCESS;
     }
 
-    int search_fulltext(const std::string& user_query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0) override
+    int search_fulltext(const std::string& user_query, std::size_t limit = 20, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0, const pagination_cursor_t& cursor = {}) override
     {
         clear_state();
 
@@ -383,11 +416,15 @@ public:
             return EXIT_FAILURE;
         }
 
-        // Snippets need only the text around the first match, so fetch a
-        // bounded excerpt instead of the whole LONGTEXT per hit. LOCATE is
-        // case-insensitive under utf8mb4_unicode_ci. If the anchor term is
-        // absent LOCATE yields 0 and the window falls back to the document
-        // start, matching build_snippet's own fallback.
+        if (cursor.active())
+        {
+            return search_fulltext_with_cursor(user_query, limit, source_filters, min_pages, max_pages, cursor);
+        }
+
+        // Rank and paginate before reading LONGTEXT for snippets. The LIMIT
+        // keeps the derived table materialized, so LOCATE runs only for the
+        // returned hits. If the anchor is absent, LOCATE yields 0 and the
+        // excerpt falls back to the document start.
         const std::vector<std::string> anchor_terms = split_terms(user_query);
         const std::string anchor = anchor_terms.empty() ? user_query : anchor_terms.front();
 
@@ -396,24 +433,32 @@ public:
         {
             mysqlpp::Query query = conn().query(
                 "SELECT "
-                "  document_id, "
-                "  filename, "
-                "  source, "
-                "  page_count, "
-                "  MATCH(full_text) AGAINST (%0q IN NATURAL LANGUAGE MODE) AS score, "
-                "  created_at, "
-                "  SUBSTRING(full_text, "
-                "            GREATEST(CAST(LOCATE(%1q, full_text) AS SIGNED) - 4000, 1), "
-                "            8000) AS excerpt "
-                "FROM documents "
-                "WHERE MATCH(full_text) AGAINST (%2q IN NATURAL LANGUAGE MODE) AND page_count >= %3 AND (%4 = 0 OR page_count <= %4) "
-                "ORDER BY score DESC, document_id DESC "
-                "LIMIT %5 OFFSET %6"
+                "  ranked.document_id, "
+                "  ranked.filename, "
+                "  ranked.source, "
+                "  ranked.page_count, "
+                "  ranked.score, "
+                "  ranked.created_at, "
+                "  SUBSTRING(documents.full_text, "
+                "            GREATEST(CAST(LOCATE(%0q, documents.full_text) AS SIGNED) - 512, 1), "
+                "            1024) AS excerpt "
+                "FROM ("
+                "  SELECT "
+                "    document_id, filename, source, page_count, "
+                "    MATCH(full_text) AGAINST (%1q IN NATURAL LANGUAGE MODE) AS score, "
+                "    created_at "
+                "  FROM documents "
+                "  WHERE MATCH(full_text) AGAINST (%2q IN NATURAL LANGUAGE MODE) AND page_count >= %3 AND (%4 = 0 OR page_count <= %4) "
+                "  ORDER BY score DESC, document_id DESC "
+                "  LIMIT %5 OFFSET %6"
+                ") AS ranked "
+                "JOIN documents ON documents.document_id = ranked.document_id "
+                "ORDER BY ranked.score DESC, ranked.document_id DESC"
             );
             query.parse();
             result = query.store(
-                user_query,
                 anchor,
+                user_query,
                 user_query,
                 mysqlpp::sql_int(min_pages),
                 mysqlpp::sql_int(max_pages),
@@ -430,24 +475,32 @@ public:
         {
             mysqlpp::Query query = conn().query(
                 "SELECT "
-                "  document_id, "
-                "  filename, "
-                "  source, "
-                "  page_count, "
-                "  MATCH(full_text) AGAINST (%0q IN NATURAL LANGUAGE MODE) AS score, "
-                "  created_at, "
-                "  SUBSTRING(full_text, "
-                "            GREATEST(CAST(LOCATE(%1q, full_text) AS SIGNED) - 4000, 1), "
-                "            8000) AS excerpt "
-                "FROM documents "
-                "WHERE MATCH(full_text) AGAINST (%2q IN NATURAL LANGUAGE MODE) AND source IN (%3q, %4q, %5q) AND page_count >= %6 AND (%7 = 0 OR page_count <= %7) "
-                "ORDER BY score DESC, document_id DESC "
-                "LIMIT %8 OFFSET %9"
+                "  ranked.document_id, "
+                "  ranked.filename, "
+                "  ranked.source, "
+                "  ranked.page_count, "
+                "  ranked.score, "
+                "  ranked.created_at, "
+                "  SUBSTRING(documents.full_text, "
+                "            GREATEST(CAST(LOCATE(%0q, documents.full_text) AS SIGNED) - 512, 1), "
+                "            1024) AS excerpt "
+                "FROM ("
+                "  SELECT "
+                "    document_id, filename, source, page_count, "
+                "    MATCH(full_text) AGAINST (%1q IN NATURAL LANGUAGE MODE) AS score, "
+                "    created_at "
+                "  FROM documents "
+                "  WHERE MATCH(full_text) AGAINST (%2q IN NATURAL LANGUAGE MODE) AND source IN (%3q, %4q, %5q) AND page_count >= %6 AND (%7 = 0 OR page_count <= %7) "
+                "  ORDER BY score DESC, document_id DESC "
+                "  LIMIT %8 OFFSET %9"
+                ") AS ranked "
+                "JOIN documents ON documents.document_id = ranked.document_id "
+                "ORDER BY ranked.score DESC, ranked.document_id DESC"
             );
             query.parse();
             result = query.store(
-                user_query,
                 anchor,
+                user_query,
                 user_query,
                 source_at(source_filters, 0),
                 source_at(source_filters, 1),
@@ -599,6 +652,224 @@ private:
     std::vector<CourtDocument> mapped_entry_vec_;
     std::vector<CourtPages> mapped_pages_vec_;
     std::vector<cdsr_t> search_results_;
+
+    static std::string source_filter_sql(const std::vector<std::string>& source_filters)
+    {
+        if (source_filters.empty())
+        {
+            return "";
+        }
+
+        std::vector<std::string> valid_sources;
+        for (const auto& source : source_filters)
+        {
+            if (source == "doj" || source == "cl" || source == "dc")
+            {
+                valid_sources.push_back(source);
+            }
+        }
+
+        if (valid_sources.empty())
+        {
+            return " AND source = '__missing_source__' ";
+        }
+
+        std::string clause = " AND source IN (";
+        for (std::size_t i = 0; i < valid_sources.size(); ++i)
+        {
+            if (i != 0)
+            {
+                clause += ",";
+            }
+            clause += "'" + valid_sources[i] + "'";
+        }
+        clause += ") ";
+        return clause;
+    }
+
+    int list_all_with_cursor(std::size_t limit,
+                             const std::vector<std::string>& source_filters,
+                             std::size_t min_pages,
+                             std::size_t max_pages,
+                             const pagination_cursor_t& cursor)
+    {
+        const bool previous = cursor.direction == pagination_direction_t::previous;
+        const std::string comparator = previous ? ">" : "<";
+        const std::string order = previous ? "ASC" : "DESC";
+        const std::string query_text =
+            "SELECT document_id, filename, source, page_count, created_at "
+            "FROM documents "
+            "WHERE page_count >= %0 AND (%1 = 0 OR page_count <= %1) " +
+            source_filter_sql(source_filters) +
+            "AND document_id " + comparator + " %2 "
+            "ORDER BY document_id " + order + " "
+            "LIMIT %3";
+
+        mysqlpp::Query query = conn().query(query_text);
+        query.parse();
+        mysqlpp::StoreQueryResult result = query.store(
+            mysqlpp::sql_int(min_pages),
+            mysqlpp::sql_int(max_pages),
+            mysqlpp::sql_int(cursor.document_id),
+            mysqlpp::sql_int(limit)
+        );
+        if (!result)
+        {
+            error_msg_ = query.error();
+            return EXIT_FAILURE;
+        }
+
+        mapped_entry_vec_.reserve(result.num_rows());
+        for (const auto& row : result)
+        {
+            mapped_entry_vec_.emplace_back(row_to_document_metadata(row));
+        }
+        if (previous)
+        {
+            std::reverse(mapped_entry_vec_.begin(), mapped_entry_vec_.end());
+        }
+
+        return EXIT_SUCCESS;
+    }
+
+    int search_by_filename_with_cursor(const std::string& user_query,
+                                       std::size_t limit,
+                                       const std::vector<std::string>& source_filters,
+                                       std::size_t min_pages,
+                                       std::size_t max_pages,
+                                       const pagination_cursor_t& cursor)
+    {
+        const bool previous = cursor.direction == pagination_direction_t::previous;
+        const std::string rank_comparator = previous ? "<" : ">";
+        const std::string filename_comparator = previous ? "<" : ">";
+        const std::string id_comparator = previous ? ">" : "<";
+        const std::string rank_order = previous ? "DESC" : "ASC";
+        const std::string filename_order = previous ? "DESC" : "ASC";
+        const std::string id_order = previous ? "ASC" : "DESC";
+        const std::string pattern = "%" + user_query + "%";
+
+        const std::string query_text =
+            "SELECT document_id, filename, source, page_count, created_at "
+            "FROM ("
+            "  SELECT document_id, filename, source, page_count, created_at, "
+            "    CASE WHEN filename = %3q THEN 0 ELSE 1 END AS exact_rank, "
+            "    CASE WHEN %4q = %5q THEN 0 ELSE 1 END AS cursor_rank "
+            "  FROM documents "
+            "  WHERE filename LIKE %0q AND page_count >= %1 AND (%2 = 0 OR page_count <= %2) " +
+            source_filter_sql(source_filters) +
+            ") AS ranked "
+            "WHERE exact_rank " + rank_comparator + " cursor_rank "
+            "   OR (exact_rank = cursor_rank AND (filename " + filename_comparator + " %6q "
+            "       OR (filename = %7q AND document_id " + id_comparator + " %8))) "
+            "ORDER BY exact_rank " + rank_order + ", filename " + filename_order +
+            ", document_id " + id_order + " "
+            "LIMIT %9";
+
+        mysqlpp::Query query = conn().query(query_text);
+        query.parse();
+        mysqlpp::StoreQueryResult result = query.store(
+            pattern,
+            mysqlpp::sql_int(min_pages),
+            mysqlpp::sql_int(max_pages),
+            user_query,
+            cursor.filename,
+            user_query,
+            cursor.filename,
+            cursor.filename,
+            mysqlpp::sql_int(cursor.document_id),
+            mysqlpp::sql_int(limit)
+        );
+        if (!result)
+        {
+            error_msg_ = query.error();
+            return EXIT_FAILURE;
+        }
+
+        mapped_entry_vec_.reserve(result.num_rows());
+        for (const auto& row : result)
+        {
+            mapped_entry_vec_.emplace_back(row_to_document_metadata(row));
+        }
+        if (previous)
+        {
+            std::reverse(mapped_entry_vec_.begin(), mapped_entry_vec_.end());
+        }
+
+        return EXIT_SUCCESS;
+    }
+
+    int search_fulltext_with_cursor(const std::string& user_query,
+                                    std::size_t limit,
+                                    const std::vector<std::string>& source_filters,
+                                    std::size_t min_pages,
+                                    std::size_t max_pages,
+                                    const pagination_cursor_t& cursor)
+    {
+        const bool previous = cursor.direction == pagination_direction_t::previous;
+        const std::string score_comparator = previous ? ">" : "<";
+        const std::string id_comparator = previous ? ">" : "<";
+        const std::string order = previous ? "ASC" : "DESC";
+        const std::vector<std::string> anchor_terms = split_terms(user_query);
+        const std::string anchor = anchor_terms.empty() ? user_query : anchor_terms.front();
+
+        const std::string query_text =
+            "SELECT "
+            "  ranked.document_id, ranked.filename, ranked.source, ranked.page_count, "
+            "  ranked.score, ranked.created_at, "
+            "  SUBSTRING(documents.full_text, "
+            "            GREATEST(CAST(LOCATE(%0q, documents.full_text) AS SIGNED) - 512, 1), "
+            "            1024) AS excerpt "
+            "FROM ("
+            "  SELECT document_id, filename, source, page_count, "
+            "    MATCH(full_text) AGAINST (%1q IN NATURAL LANGUAGE MODE) AS score, "
+            "    created_at "
+            "  FROM documents "
+            "  WHERE MATCH(full_text) AGAINST (%2q IN NATURAL LANGUAGE MODE) "
+            "    AND page_count >= %3 AND (%4 = 0 OR page_count <= %4) " +
+            source_filter_sql(source_filters) +
+            "  HAVING score " + score_comparator + " %5 "
+            "      OR (score = %6 AND document_id " + id_comparator + " %7) "
+            "  ORDER BY score " + order + ", document_id " + order + " "
+            "  LIMIT %8"
+            ") AS ranked "
+            "JOIN documents ON documents.document_id = ranked.document_id "
+            "ORDER BY ranked.score DESC, ranked.document_id DESC";
+
+        mysqlpp::Query query = conn().query(query_text);
+        query.parse();
+        mysqlpp::StoreQueryResult result = query.store(
+            anchor,
+            user_query,
+            user_query,
+            mysqlpp::sql_int(min_pages),
+            mysqlpp::sql_int(max_pages),
+            mysqlpp::sql_double(cursor.score),
+            mysqlpp::sql_double(cursor.score),
+            mysqlpp::sql_int(cursor.document_id),
+            mysqlpp::sql_int(limit)
+        );
+        if (!result)
+        {
+            error_msg_ = query.error();
+            return EXIT_FAILURE;
+        }
+
+        search_results_.reserve(result.num_rows());
+        for (const auto& row : result)
+        {
+            cdsr_t hit;
+            hit.document_id = int(row[0]);
+            hit.filename = safe_string(row[1]);
+            hit.source = safe_string(row[2]);
+            hit.page_count = int(row[3]);
+            hit.score = double(row[4]);
+            hit.created_at = safe_string(row[5]);
+            hit.snippet = build_snippet(safe_string(row[6]), user_query, 120);
+            search_results_.push_back(std::move(hit));
+        }
+
+        return EXIT_SUCCESS;
+    }
 
     mysqlpp::Connection& conn()
     {
@@ -816,7 +1087,7 @@ public:
     CourtDocument mapped_entry_ = create_empty_document();
     std::vector<CourtDocument> mapped_vec_;
     std::vector<CourtPages> mapped_pages_vec_;
-    std::vector<CourtDocumentSearchResult> search_results_;
+    std::vector<cdsr_t> search_results_;
     std::string last_error_;
 
     int get_by_id(int id) override
@@ -835,7 +1106,7 @@ public:
         return EXIT_SUCCESS;
     }
 
-    int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0) override
+    int list_all(std::size_t limit = 100, std::size_t offset = 0, const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0, const pagination_cursor_t& cursor = {}) override
     {
         clear_state();
 
@@ -852,6 +1123,30 @@ public:
         }
 
         std::sort(ids.begin(), ids.end(), std::greater<int>());
+
+        if (cursor.active())
+        {
+            std::vector<int> eligible;
+            for (int id : ids)
+            {
+                const bool matches = cursor.direction == pagination_direction_t::next
+                    ? id < cursor.document_id
+                    : id > cursor.document_id;
+                if (matches)
+                {
+                    eligible.push_back(id);
+                }
+            }
+
+            const std::size_t start = cursor.direction == pagination_direction_t::previous && eligible.size() > limit
+                ? eligible.size() - limit
+                : 0;
+            for (std::size_t i = start; i < eligible.size() && mapped_vec_.size() < limit; ++i)
+            {
+                mapped_vec_.push_back(documents_by_id_[eligible[i]]);
+            }
+            return EXIT_SUCCESS;
+        }
 
         std::size_t seen = 0;
         for (int id : ids)
@@ -873,7 +1168,8 @@ public:
     int search_by_filename(const std::string& query,
                            std::size_t limit = 20,
                            std::size_t offset = 0,
-                           const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0) override
+                           const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0,
+                           const pagination_cursor_t& cursor = {}) override
     {
         clear_state();
 
@@ -918,6 +1214,49 @@ public:
                 return a.document_id > b.document_id;
             });
 
+        if (cursor.active())
+        {
+            const std::string cursor_filename = to_lower_copy(cursor.filename);
+            const int cursor_rank = cursor_filename == needle ? 0 : 1;
+            std::vector<CourtDocument> eligible;
+
+            for (const auto& hit : hits)
+            {
+                const std::string filename = to_lower_copy(std::string(hit.filename));
+                const int rank = filename == needle ? 0 : 1;
+                int comparison = 0;
+                if (rank != cursor_rank)
+                {
+                    comparison = rank < cursor_rank ? -1 : 1;
+                }
+                else if (filename != cursor_filename)
+                {
+                    comparison = filename < cursor_filename ? -1 : 1;
+                }
+                else if (hit.document_id != cursor.document_id)
+                {
+                    comparison = hit.document_id > cursor.document_id ? -1 : 1;
+                }
+
+                const bool matches = cursor.direction == pagination_direction_t::next
+                    ? comparison > 0
+                    : comparison < 0;
+                if (matches)
+                {
+                    eligible.push_back(hit);
+                }
+            }
+
+            const std::size_t start = cursor.direction == pagination_direction_t::previous && eligible.size() > limit
+                ? eligible.size() - limit
+                : 0;
+            for (std::size_t i = start; i < eligible.size() && mapped_vec_.size() < limit; ++i)
+            {
+                mapped_vec_.push_back(eligible[i]);
+            }
+            return EXIT_SUCCESS;
+        }
+
         for (std::size_t i = offset; i < hits.size() && mapped_vec_.size() < limit; ++i)
         {
             mapped_vec_.push_back(hits[i]);
@@ -949,7 +1288,8 @@ public:
     int search_fulltext(const std::string& query,
                         std::size_t limit = 20,
                         std::size_t offset = 0,
-                        const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0) override
+                        const std::vector<std::string>& source_filters = {}, std::size_t min_pages = 0, std::size_t max_pages = 0,
+                        const pagination_cursor_t& cursor = {}) override
     {
         clear_state();
 
@@ -961,7 +1301,7 @@ public:
 
         struct TempHit
         {
-            CourtDocumentSearchResult result;
+            cdsr_t result;
         };
 
         std::vector<TempHit> hits;
@@ -996,7 +1336,7 @@ public:
                 continue;
             }
 
-            CourtDocumentSearchResult hit;
+            cdsr_t hit;
             hit.document_id = doc.document_id;
             hit.filename    = std::string(doc.filename);
             hit.source      = std::string(doc.source);
@@ -1017,6 +1357,40 @@ public:
                 }
                 return a.result.document_id > b.result.document_id;
             });
+
+        if (cursor.active())
+        {
+            std::vector<cdsr_t> eligible;
+            for (const auto& hit : hits)
+            {
+                int comparison = 0;
+                if (hit.result.score != cursor.score)
+                {
+                    comparison = hit.result.score > cursor.score ? -1 : 1;
+                }
+                else if (hit.result.document_id != cursor.document_id)
+                {
+                    comparison = hit.result.document_id > cursor.document_id ? -1 : 1;
+                }
+
+                const bool matches = cursor.direction == pagination_direction_t::next
+                    ? comparison > 0
+                    : comparison < 0;
+                if (matches)
+                {
+                    eligible.push_back(hit.result);
+                }
+            }
+
+            const std::size_t start = cursor.direction == pagination_direction_t::previous && eligible.size() > limit
+                ? eligible.size() - limit
+                : 0;
+            for (std::size_t i = start; i < eligible.size() && search_results_.size() < limit; ++i)
+            {
+                search_results_.push_back(eligible[i]);
+            }
+            return EXIT_SUCCESS;
+        }
 
         for (std::size_t i = offset; i < hits.size() && search_results_.size() < limit; ++i)
         {
@@ -1046,7 +1420,7 @@ public:
         return mapped_pages_vec_;
     }
 
-    std::vector<CourtDocumentSearchResult> get_search_results() override
+    std::vector<cdsr_t> get_search_results() override
     {
         return search_results_;
     }
@@ -1261,6 +1635,101 @@ inline bool parse_page_count_param(const char* raw, std::size_t& value, std::siz
 }
 
 
+enum class pagination_cursor_kind_t
+{
+    documents,
+    filename,
+    fulltext
+};
+
+inline bool parse_pagination_cursor(const crow::request& req,
+                                    pagination_cursor_kind_t kind,
+                                    pagination_cursor_t& cursor,
+                                    std::string& error)
+{
+    cursor = {};
+    error.clear();
+
+    const char* direction_raw = req.url_params.get("direction");
+    const char* id_raw = req.url_params.get("cursor_id");
+    const char* score_raw = req.url_params.get("cursor_score");
+    const char* filename_raw = req.url_params.get("cursor_filename");
+    const bool any_cursor_param = direction_raw || id_raw || score_raw || filename_raw;
+    if (!any_cursor_param)
+    {
+        return true;
+    }
+
+    if (!direction_raw || !id_raw)
+    {
+        error = "Cursor requests require direction and cursor_id";
+        return false;
+    }
+    if (std::string(direction_raw) == "next")
+    {
+        cursor.direction = pagination_direction_t::next;
+    }
+    else if (std::string(direction_raw) == "previous")
+    {
+        cursor.direction = pagination_direction_t::previous;
+    }
+    else
+    {
+        error = "Invalid cursor direction";
+        return false;
+    }
+
+    errno = 0;
+    char* id_end = nullptr;
+    const long parsed_id = std::strtol(id_raw, &id_end, 10);
+    if (errno != 0 || id_end == id_raw || *id_end != '\0' || parsed_id <= 0 ||
+        parsed_id > std::numeric_limits<int>::max())
+    {
+        error = "Invalid cursor_id";
+        return false;
+    }
+    cursor.document_id = static_cast<int>(parsed_id);
+
+    if (kind == pagination_cursor_kind_t::documents)
+    {
+        if (score_raw || filename_raw)
+        {
+            error = "Document cursors accept only direction and cursor_id";
+            return false;
+        }
+        return true;
+    }
+
+    if (kind == pagination_cursor_kind_t::filename)
+    {
+        if (score_raw || !filename_raw || *filename_raw == '\0')
+        {
+            error = "Filename cursors require cursor_filename and do not accept cursor_score";
+            return false;
+        }
+        cursor.filename = filename_raw;
+        return true;
+    }
+
+    if (filename_raw || !score_raw || *score_raw == '\0')
+    {
+        error = "Full-text cursors require cursor_score and do not accept cursor_filename";
+        return false;
+    }
+
+    errno = 0;
+    char* score_end = nullptr;
+    const double parsed_score = std::strtod(score_raw, &score_end);
+    if (errno != 0 || score_end == score_raw || *score_end != '\0' || !std::isfinite(parsed_score) ||
+        parsed_score < 0.0)
+    {
+        error = "Invalid cursor_score";
+        return false;
+    }
+    cursor.score = parsed_score;
+    return true;
+}
+
 inline bool parse_source_param(const char* raw, std::vector<std::string>& source_filters)
 {
     source_filters.clear();
@@ -1332,6 +1801,16 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
 
         std::size_t limit  = parse_size_param(req.url_params.get("limit"), 100, 100);
         std::size_t offset = parse_size_param(req.url_params.get("offset"), 0, 1000000);
+        pagination_cursor_t cursor;
+        std::string cursor_error;
+        if (!parse_pagination_cursor(req, pagination_cursor_kind_t::documents, cursor, cursor_error))
+        {
+            return crow::response(400, cursor_error);
+        }
+        if (cursor.active() && offset != 0)
+        {
+            return crow::response(400, "Cursor requests cannot use a nonzero offset");
+        }
         std::vector<std::string> source_filters;
         if (!parse_source_param(req.url_params.get("source"), source_filters))
         {
@@ -1347,7 +1826,7 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
             return crow::response(400, "Invalid page range parameter");
         }
 
-        int result = repo.list_all(limit, offset, source_filters, min_pages, max_pages);
+        int result = repo.list_all(limit, offset, source_filters, min_pages, max_pages, cursor);
         if (result != EXIT_SUCCESS)
         {
             return crow::response(500, repo.error());
@@ -1372,6 +1851,16 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
 
         std::size_t limit  = parse_size_param(req.url_params.get("limit"), 20, 50);
         std::size_t offset = parse_size_param(req.url_params.get("offset"), 0, 10000);
+        pagination_cursor_t cursor;
+        std::string cursor_error;
+        if (!parse_pagination_cursor(req, pagination_cursor_kind_t::filename, cursor, cursor_error))
+        {
+            return crow::response(400, cursor_error);
+        }
+        if (cursor.active() && offset != 0)
+        {
+            return crow::response(400, "Cursor requests cannot use a nonzero offset");
+        }
         std::vector<std::string> source_filters;
         if (!parse_source_param(req.url_params.get("source"), source_filters))
         {
@@ -1387,7 +1876,7 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
             return crow::response(400, "Invalid page range parameter");
         }
 
-        int result = repo.search_by_filename(q, limit, offset, source_filters, min_pages, max_pages);
+        int result = repo.search_by_filename(q, limit, offset, source_filters, min_pages, max_pages, cursor);
         if (result != EXIT_SUCCESS)
         {
             return crow::response(500, repo.error());
@@ -1429,6 +1918,16 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
 
         std::size_t limit  = parse_size_param(req.url_params.get("limit"), 20, 50);
         std::size_t offset = parse_size_param(req.url_params.get("offset"), 0, 10000);
+        pagination_cursor_t cursor;
+        std::string cursor_error;
+        if (!parse_pagination_cursor(req, pagination_cursor_kind_t::fulltext, cursor, cursor_error))
+        {
+            return crow::response(400, cursor_error);
+        }
+        if (cursor.active() && offset != 0)
+        {
+            return crow::response(400, "Cursor requests cannot use a nonzero offset");
+        }
         std::vector<std::string> source_filters;
         if (!parse_source_param(req.url_params.get("source"), source_filters))
         {
@@ -1444,7 +1943,7 @@ void mysqlCourtDocuments_routes(crow::Crow<Middlewares...>& app, SimpleConnectio
             return crow::response(400, "Invalid page range parameter");
         }
 
-        int result = repo.search_fulltext(q, limit, offset, source_filters, min_pages, max_pages);
+        int result = repo.search_fulltext(q, limit, offset, source_filters, min_pages, max_pages, cursor);
         if (result != EXIT_SUCCESS)
         {
             return crow::response(500, repo.error());

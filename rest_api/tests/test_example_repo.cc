@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "example_repository.hpp"
+#include "court_doc_repository.hpp"
 
 //ExampleUsersRepositoryImpl 
 TEST(FakeRepo, CreateAssignsIdAndReturnsSuccess)
@@ -140,4 +141,122 @@ TEST(FakeRepo, Remove_NotFound_ReturnsFailure)
 
     EXPECT_EQ(repo.remove(12345), EXIT_FAILURE);
     EXPECT_STREQ(repo.error(), "not found");
+}
+
+
+namespace
+{
+CourtDocument make_court_document(int id,
+                                  const std::string& filename,
+                                  const std::string& full_text,
+                                  const std::string& source = "doj",
+                                  int page_count = 1)
+{
+    CourtDocument doc;
+    doc.document_id = id;
+    doc.filename = filename;
+    doc.source = source;
+    doc.page_count = page_count;
+    doc.full_text = full_text;
+    doc.created_at = mysqlpp::DateTime();
+    return doc;
+}
+
+std::vector<int> document_ids(const std::vector<CourtDocument>& docs)
+{
+    std::vector<int> ids;
+    for (const auto& doc : docs)
+    {
+        ids.push_back(doc.document_id);
+    }
+    return ids;
+}
+
+std::vector<int> search_result_ids(const std::vector<cdsr_t>& hits)
+{
+    std::vector<int> ids;
+    for (const auto& hit : hits)
+    {
+        ids.push_back(hit.document_id);
+    }
+    return ids;
+}
+}
+
+TEST(FakeCourtDocumentsRepo, ListCursorMovesForwardAndBackwardFromOffsetPage)
+{
+    FakeCourtDocumentsRepository repo;
+    for (int id = 1; id <= 6; ++id)
+    {
+        repo.documents_by_id_[id] = make_court_document(id, "doc-" + std::to_string(id), "alpha");
+    }
+
+    ASSERT_EQ(repo.list_all(2, 2), EXIT_SUCCESS);
+    EXPECT_EQ(document_ids(repo.get_mapped_entry_vector()), (std::vector<int>{4, 3}));
+
+    pagination_cursor_t next_cursor;
+    next_cursor.direction = pagination_direction_t::next;
+    next_cursor.document_id = 3;
+    ASSERT_EQ(repo.list_all(2, 0, {}, 0, 0, next_cursor), EXIT_SUCCESS);
+    EXPECT_EQ(document_ids(repo.get_mapped_entry_vector()), (std::vector<int>{2, 1}));
+
+    pagination_cursor_t previous_cursor;
+    previous_cursor.direction = pagination_direction_t::previous;
+    previous_cursor.document_id = 4;
+    ASSERT_EQ(repo.list_all(2, 0, {}, 0, 0, previous_cursor), EXIT_SUCCESS);
+    EXPECT_EQ(document_ids(repo.get_mapped_entry_vector()), (std::vector<int>{6, 5}));
+}
+
+TEST(FakeCourtDocumentsRepo, FilenameCursorPreservesCompoundOrdering)
+{
+    FakeCourtDocumentsRepository repo;
+    repo.documents_by_id_[6] = make_court_document(6, "report", "alpha");
+    repo.documents_by_id_[5] = make_court_document(5, "report-a", "alpha");
+    repo.documents_by_id_[4] = make_court_document(4, "report-a", "alpha");
+    repo.documents_by_id_[3] = make_court_document(3, "report-z", "alpha");
+
+    ASSERT_EQ(repo.search_by_filename("report", 2, 1), EXIT_SUCCESS);
+    EXPECT_EQ(document_ids(repo.get_mapped_entry_vector()), (std::vector<int>{5, 4}));
+
+    pagination_cursor_t next_cursor;
+    next_cursor.direction = pagination_direction_t::next;
+    next_cursor.document_id = 4;
+    next_cursor.filename = "report-a";
+    ASSERT_EQ(repo.search_by_filename("report", 2, 0, {}, 0, 0, next_cursor), EXIT_SUCCESS);
+    EXPECT_EQ(document_ids(repo.get_mapped_entry_vector()), (std::vector<int>{3}));
+
+    pagination_cursor_t previous_cursor;
+    previous_cursor.direction = pagination_direction_t::previous;
+    previous_cursor.document_id = 5;
+    previous_cursor.filename = "report-a";
+    ASSERT_EQ(repo.search_by_filename("report", 2, 0, {}, 0, 0, previous_cursor), EXIT_SUCCESS);
+    EXPECT_EQ(document_ids(repo.get_mapped_entry_vector()), (std::vector<int>{6}));
+}
+
+TEST(FakeCourtDocumentsRepo, FulltextCursorHandlesTiedScores)
+{
+    FakeCourtDocumentsRepository repo;
+    repo.documents_by_id_[6] = make_court_document(6, "doc-6", "alpha alpha alpha");
+    repo.documents_by_id_[5] = make_court_document(5, "doc-5", "alpha alpha alpha");
+    repo.documents_by_id_[4] = make_court_document(4, "doc-4", "alpha alpha");
+    repo.documents_by_id_[3] = make_court_document(3, "doc-3", "alpha alpha");
+    repo.documents_by_id_[2] = make_court_document(2, "doc-2", "alpha");
+
+    ASSERT_EQ(repo.search_fulltext("alpha", 2, 1), EXIT_SUCCESS);
+    const auto offset_hits = repo.get_search_results();
+    EXPECT_EQ(search_result_ids(offset_hits), (std::vector<int>{5, 4}));
+
+    pagination_cursor_t next_cursor;
+    next_cursor.direction = pagination_direction_t::next;
+    next_cursor.document_id = offset_hits.back().document_id;
+    next_cursor.score = offset_hits.back().score;
+    ASSERT_EQ(repo.search_fulltext("alpha", 2, 0, {}, 0, 0, next_cursor), EXIT_SUCCESS);
+    EXPECT_EQ(search_result_ids(repo.get_search_results()), (std::vector<int>{3, 2}));
+
+    pagination_cursor_t previous_cursor;
+    previous_cursor.direction = pagination_direction_t::previous;
+    previous_cursor.document_id = offset_hits.front().document_id;
+    previous_cursor.score = offset_hits.front().score;
+    ASSERT_EQ(repo.search_fulltext("alpha", 2, 0, {}, 0, 0, previous_cursor), EXIT_SUCCESS);
+    EXPECT_EQ(search_result_ids(repo.get_search_results()), (std::vector<int>{6}));
 }

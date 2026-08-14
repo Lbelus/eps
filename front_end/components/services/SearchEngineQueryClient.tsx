@@ -33,6 +33,7 @@ type ResultItem = CourtDocument & {
 };
 
 type ResultMode = "all" | "search" | "filename";
+type PaginationDirection = "next" | "previous";
 type SourceFilter = "doj" | "cl" | "dc";
 type DetailTab = "pages" | "fullText" | "metadata";
 
@@ -221,6 +222,9 @@ const SearchEngineQueryClient: React.FC = () => {
   const [limit, setLimit] = useState("20");
   const [offset, setOffset] = useState("0");
   const [mode, setMode] = useState<ResultMode>("all");
+  const [activePageLimit, setActivePageLimit] = useState(20);
+  const [canNavigatePrevious, setCanNavigatePrevious] = useState(false);
+  const [canNavigateNext, setCanNavigateNext] = useState(false);
   const [sourceFilters, setSourceFilters] = useState<SourceFilter[]>([]);
   const [minPages, setMinPages] = useState("0");
   const [maxPages, setMaxPages] = useState("");
@@ -301,9 +305,24 @@ const SearchEngineQueryClient: React.FC = () => {
     }
   };
 
-  const loadResults = async (nextMode: ResultMode, nextOffset: number) => {
+  const resetCursorNavigation = () => {
+    setCanNavigatePrevious(false);
+    setCanNavigateNext(false);
+  };
+
+  const loadResults = async (
+    nextMode: ResultMode,
+    requestedOffset: number,
+    direction?: PaginationDirection,
+    cursor?: ResultItem
+  ) => {
     const normalizedQuery = query.trim();
     const pageMaxParam = maxPageFilter === "" ? "" : maxPageFilter;
+    const offsetCap = nextMode === "all" ? 1000000 : 10000;
+    const nextOffset = direction
+      ? Math.max(0, requestedOffset)
+      : Math.min(Math.max(0, requestedOffset), offsetCap);
+    const requestLimit = Math.min(resultLimit, nextMode === "all" ? 100 : 50);
 
     if (typeof maxPageFilter === "number" && maxPageFilter !== 0 && minPageFilter > maxPageFilter) {
       setStatus({ type: "error", message: "Minimum pages cannot be greater than maximum pages." });
@@ -316,24 +335,62 @@ const SearchEngineQueryClient: React.FC = () => {
       });
       return;
     }
+    if (direction && !cursor) {
+      setStatus({ type: "error", message: "Unable to continue from the current result page." });
+      return;
+    }
+    if (direction && nextMode === "search" && typeof cursor?.score !== "number") {
+      setStatus({ type: "error", message: "The current search result has no relevance cursor." });
+      return;
+    }
+
+    const paginationParams: Record<string, string | number> = direction && cursor
+      ? { direction, cursor_id: cursor.document_id }
+      : { offset: nextOffset };
+    if (direction && cursor && nextMode === "search") {
+      paginationParams.cursor_score = cursor.score as number;
+    } else if (direction && cursor && nextMode === "filename") {
+      paginationParams.cursor_filename = cursor.filename;
+    }
 
     setMode(nextMode);
-    setOffset(String(nextOffset));
     setStatus({
       type: "loading",
       message: nextMode === "search" ? "Searching document text." : nextMode === "filename" ? "Searching filenames." : "Loading documents.",
     });
 
     try {
+      const commonParams = {
+        source: sourceParam,
+        page_min: minPageFilter,
+        page_max: pageMaxParam,
+        limit: requestLimit,
+        ...paginationParams,
+      };
       const path =
         nextMode === "search"
-          ? "/courtdocuments/search" + buildQueryString({ q: normalizedQuery, source: sourceParam, page_min: minPageFilter, page_max: pageMaxParam, limit: resultLimit, offset: nextOffset })
+          ? "/courtdocuments/search" + buildQueryString({ q: normalizedQuery, ...commonParams })
           : nextMode === "filename"
-            ? "/courtdocuments/by-filename" + buildQueryString({ q: normalizedQuery, source: sourceParam, page_min: minPageFilter, page_max: pageMaxParam, limit: resultLimit, offset: nextOffset })
-            : "/courtdocuments" + buildQueryString({ source: sourceParam, page_min: minPageFilter, page_max: pageMaxParam, limit: resultLimit, offset: nextOffset });
+            ? "/courtdocuments/by-filename" + buildQueryString({ q: normalizedQuery, ...commonParams })
+            : "/courtdocuments" + buildQueryString(commonParams);
 
       const data = await requestJson<Array<SearchHit | CourtDocument>>(path);
       const nextResults = data as ResultItem[];
+
+      if (direction && nextResults.length === 0) {
+        if (direction === "next") {
+          setCanNavigateNext(false);
+        } else {
+          setCanNavigatePrevious(false);
+        }
+        setStatus({ type: "success", message: "No more documents in this direction." });
+        return;
+      }
+
+      setOffset(String(nextOffset));
+      setActivePageLimit(requestLimit);
+      setCanNavigatePrevious(nextOffset > 0 && nextResults.length > 0);
+      setCanNavigateNext(direction === "previous" ? nextResults.length > 0 : nextResults.length === requestLimit);
       setResults(nextResults);
       setStatus({
         type: "success",
@@ -354,12 +411,20 @@ const SearchEngineQueryClient: React.FC = () => {
   };
 
   const handlePreviousResults = () => {
-    const previousOffset = Math.max(0, resultOffset - resultLimit);
-    void loadResults(mode, previousOffset);
+    const firstResult = results[0];
+    if (!firstResult) {
+      return;
+    }
+    const previousOffset = Math.max(0, resultOffset - activePageLimit);
+    void loadResults(mode, previousOffset, "previous", firstResult);
   };
 
   const handleNextResults = () => {
-    void loadResults(mode, resultOffset + resultLimit);
+    const lastResult = results[results.length - 1];
+    if (!lastResult) {
+      return;
+    }
+    void loadResults(mode, resultOffset + results.length, "next", lastResult);
   };
   const handleExportCsv = () => {
     if (results.length === 0 || typeof window === "undefined") {
@@ -388,6 +453,7 @@ const SearchEngineQueryClient: React.FC = () => {
   };
 
   const toggleSourceFilter = (source: SourceFilter) => {
+    resetCursorNavigation();
     setSourceFilters((current) =>
       current.includes(source) ? current.filter((item) => item !== source) : [...current, source]
     );
@@ -457,10 +523,13 @@ const SearchEngineQueryClient: React.FC = () => {
                 <input
                   type="search"
                   value={query}
-                  onChange={(event) => setQuery(event.target.value)}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    resetCursorNavigation();
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
-                      void loadResults("search", 0);
+                      void loadResults("search", resultOffset);
                     }
                   }}
                   placeholder="Epstein, flight logs, subpoena..."
@@ -474,7 +543,10 @@ const SearchEngineQueryClient: React.FC = () => {
                   <button
                     type="button"
                     aria-pressed={sourceFilters.length === 0}
-                    onClick={() => setSourceFilters([])}
+                    onClick={() => {
+                      setSourceFilters([]);
+                      resetCursorNavigation();
+                    }}
                     className={`rounded-md border px-3 py-2 text-left text-sm font-medium transition ${
                       sourceFilters.length === 0
                         ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950"
@@ -513,7 +585,10 @@ const SearchEngineQueryClient: React.FC = () => {
                       type="number"
                       min={0}
                       value={minPages}
-                      onChange={(event) => setMinPages(event.target.value)}
+                      onChange={(event) => {
+                        setMinPages(event.target.value);
+                        resetCursorNavigation();
+                      }}
                       className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                     />
                   </label>
@@ -523,7 +598,10 @@ const SearchEngineQueryClient: React.FC = () => {
                       type="number"
                       min={0}
                       value={maxPages}
-                      onChange={(event) => setMaxPages(event.target.value)}
+                      onChange={(event) => {
+                        setMaxPages(event.target.value);
+                        resetCursorNavigation();
+                      }}
                       placeholder="All"
                       className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                     />
@@ -539,7 +617,10 @@ const SearchEngineQueryClient: React.FC = () => {
                     min={1}
                     max={MAX_DOCUMENT_LIMIT}
                     value={limit}
-                    onChange={(event) => setLimit(event.target.value)}
+                    onChange={(event) => {
+                      setLimit(event.target.value);
+                      resetCursorNavigation();
+                    }}
                     className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   />
                 </label>
@@ -548,8 +629,12 @@ const SearchEngineQueryClient: React.FC = () => {
                   <input
                     type="number"
                     min={0}
+                    max={mode === "all" ? 1000000 : 10000}
                     value={offset}
-                    onChange={(event) => setOffset(event.target.value)}
+                    onChange={(event) => {
+                      setOffset(event.target.value);
+                      resetCursorNavigation();
+                    }}
                     className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   />
                 </label>
@@ -558,21 +643,21 @@ const SearchEngineQueryClient: React.FC = () => {
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => void loadResults("search", 0)}
+                  onClick={() => void loadResults("search", resultOffset)}
                   className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"
                 >
                   Search
                 </button>
                 <button
                   type="button"
-                  onClick={() => void loadResults("filename", 0)}
+                  onClick={() => void loadResults("filename", resultOffset)}
                   className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-500 dark:border-slate-700 dark:text-slate-200"
                 >
                   Filename
                 </button>
                 <button
                   type="button"
-                  onClick={() => void loadResults("all", 0)}
+                  onClick={() => void loadResults("all", resultOffset)}
                   className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-500 dark:border-slate-700 dark:text-slate-200"
                 >
                   All documents
@@ -597,7 +682,7 @@ const SearchEngineQueryClient: React.FC = () => {
             <button
               type="button"
               onClick={handlePreviousResults}
-              disabled={resultOffset === 0 || status.type === "loading"}
+              disabled={!canNavigatePrevious || status.type === "loading"}
               className="rounded-md border border-slate-300 px-3 py-1.5 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-200"
             >
               Previous
@@ -614,7 +699,7 @@ const SearchEngineQueryClient: React.FC = () => {
             <button
               type="button"
               onClick={handleNextResults}
-              disabled={results.length < resultLimit || status.type === "loading"}
+              disabled={!canNavigateNext || status.type === "loading"}
               className="rounded-md border border-slate-300 px-3 py-1.5 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-200"
             >
               Next
