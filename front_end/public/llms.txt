@@ -23,7 +23,6 @@ Returns an array of documents. Each document includes:
 - `filename`: source filename
 - `source`: short source code, such as `cl`, `dc`, or `doj`
 - `page_count`: number of pages in the document
-- `full_text`: OCR or extracted text when available
 - `created_at`: creation timestamp
 
 Example:
@@ -31,6 +30,19 @@ Example:
 ```bash
 curl "${NEXT_PUBLIC_REST_API_URL}/courtdocuments?limit=10&offset=0"
 ```
+
+### Continue document results with a cursor
+
+Use the first page's offset for an arbitrary jump. For subsequent pages, use the last result as the Next cursor or the first result as the Previous cursor:
+
+```bash
+curl -G "${NEXT_PUBLIC_REST_API_URL}/courtdocuments" \
+  --data-urlencode "limit=10" \
+  --data-urlencode "direction=next" \
+  --data-urlencode "cursor_id=590001"
+```
+
+The maximum initial offset is 1,000,000. Do not combine a cursor with a nonzero offset.
 
 ### Get one court document
 
@@ -61,6 +73,23 @@ Example:
 curl "${NEXT_PUBLIC_REST_API_URL}/courtdocuments/1/pages"
 ```
 
+### Search document filenames
+
+`GET /courtdocuments/by-filename?q=<query>&limit=<number>&offset=<number>`
+
+For cursor navigation, keep the same query and filters and send `direction`, `cursor_id`, and `cursor_filename` from the page boundary:
+
+```bash
+curl -G "${NEXT_PUBLIC_REST_API_URL}/courtdocuments/by-filename" \
+  --data-urlencode "q=EFTA" \
+  --data-urlencode "limit=10" \
+  --data-urlencode "direction=next" \
+  --data-urlencode "cursor_id=590001" \
+  --data-urlencode "cursor_filename=EFTA01200390.pdf"
+```
+
+The maximum initial filename-search offset is 10,000.
+
 ### Search court documents
 
 `GET /courtdocuments/search?q=<query>&limit=<number>&offset=<number>`
@@ -87,10 +116,23 @@ curl -G "${NEXT_PUBLIC_REST_API_URL}/courtdocuments/search" \
   --data-urlencode "offset=0"
 ```
 
+For subsequent pages, keep the same query and filters and send `direction`, `cursor_id`, and the boundary result's `score` as `cursor_score`:
+
+```bash
+curl -G "${NEXT_PUBLIC_REST_API_URL}/courtdocuments/search" \
+  --data-urlencode "q=flight logs" \
+  --data-urlencode "limit=10" \
+  --data-urlencode "direction=next" \
+  --data-urlencode "cursor_id=584373" \
+  --data-urlencode "cursor_score=7385.1435546875"
+```
+
+The maximum initial full-text offset is 10,000. Use the last result for Next and the first result for Previous.
+
 ## Agent usage guidance
 
 - Prefer `GET /courtdocuments/search` for discovery, then fetch the selected document with `GET /courtdocuments/<id>` and pages with `GET /courtdocuments/<id>/pages`.
-- Use small `limit` values first, such as 10 or 20, and paginate with `offset`.
+- Use small `limit` values first, such as 10 or 20. Use `offset` for an initial jump, then boundary cursors for Previous and Next navigation.
 - URL-encode all search queries.
 - Treat OCR text and snippets as research aids. Verify citations against original source documents when legal accuracy matters.
 - Do not assume references to people, organizations, or allegations are findings by EPS. They reflect public source material and automated extraction.
