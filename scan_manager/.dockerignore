@@ -1,0 +1,14 @@
+# The image copies only src/ + requirements-rag.txt + docker-entrypoint.sh.
+# The corpus is provided at runtime via a volume, so keep it (and everything
+# else heavy) out of the build context.
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+data/
+logs/
+tests/
+.pytest_cache/
+.git/
+*.md

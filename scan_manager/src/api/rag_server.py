@@ -11,6 +11,7 @@ Run from scan_manager/:
 """
 
 import json
+import os
 import secrets
 import threading
 
@@ -22,12 +23,23 @@ from pydantic import BaseModel
 from core.database import init_db
 from core.rag import MODEL, PROVIDER, ProviderError, make_client, stream_turn
 
-DB_PATH = "./data/epstein.db"
+DB_PATH = os.environ.get("RAG_DB_PATH", "./data/epstein.db")
+
+# Browser origins allowed to call the API (comma-separated). Defaults to the
+# local Next.js dev server; set RAG_CORS_ORIGINS to the deployed front-end
+# origin(s) in production.
+CORS_ORIGINS = [
+    o.strip()
+    for o in os.environ.get(
+        "RAG_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+    ).split(",")
+    if o.strip()
+]
 
 app = FastAPI(title="EPS RAG chat")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

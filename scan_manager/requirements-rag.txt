@@ -1,0 +1,11 @@
+# Runtime dependencies for the RAG chat API only (src/api/rag_server.py + the
+# chat/embeddings/database modules it imports). Deliberately excludes the OCR /
+# crawler stack (playwright, pdf2image, pytesseract, pillow, mysql-connector,
+# beautifulsoup4, rapidfuzz) so the deployed image stays small. For the full
+# ingest/crawl pipeline use requirements.txt instead.
+anthropic>=0.117.0
+fastapi>=0.139.0
+numpy>=2.0
+openai>=2.46.0
+requests>=2.32.0
+uvicorn[standard]>=0.51.0
