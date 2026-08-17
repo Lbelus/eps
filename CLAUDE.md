@@ -72,6 +72,11 @@ python src/main.py --mode embed                    # embeds all pages -> page_em
 # Run Ollama with a large enough context or prompts get silently truncated:
 #   OLLAMA_CONTEXT_LENGTH=16384 ollama serve
 
+# Docker deployment (RAG API + Ollama + model pull) — from the repo root:
+#   docker compose up --build            # see scan_manager/README.md "Docker deployment"
+# rag-api Dockerfile + entrypoint live in scan_manager/; corpus via the
+# ./scan_manager/data mount (entrypoint decompresses epstein.db.gz on a fresh host).
+
 # --- Legacy token pipeline ---
 python src/main.py --mode scan                     # Full pipeline: OCR → tokenize → CSV
 python src/main.py --mode scan_exclude             # OCR only files NOT already in CSV

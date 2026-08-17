@@ -159,10 +159,51 @@ DELETE /rag/session/{id}      drop a conversation
 ```
 
 The SSE stream emits `{"type": "session"|"text"|"tool"|"done"|"error", ...}`
-events. Sessions are in-memory (lost on restart) and the API has no auth —
-local dev only.
+events. Sessions are in-memory (lost on restart) and the API has no auth — put
+it behind a reverse proxy / auth layer before exposing it publicly.
 
-### 5. Legacy pipeline (token extraction)
+### 5. Docker deployment (RAG API + Ollama)
+
+The whole free/open-source RAG stack runs from the repo-root `docker-compose.yml`:
+an Ollama container, a one-shot model pull, and the RAG API — no host Python,
+Ollama, or manual model pulls required.
+
+```bash
+# from the repo root
+docker compose up --build            # start Ollama, pull models, run the API
+curl localhost:8000/rag/health       # {"status":"ok", "provider":"openai", ...}
+```
+
+What it does:
+- **`ollama`** — serves the models; they persist on the `ollama-models` volume.
+- **`ollama-pull`** — pulls `qwen3:4b` + `nomic-embed-text`, then exits; the API
+  waits for it (`service_completed_successfully`).
+- **`rag-api`** — the FastAPI server on port 8000, reaching Ollama by service name.
+
+The corpus is provided by the `./scan_manager/data` mount. On a dev host that
+reuses your locally-built `epstein.db` (with embeddings); on a fresh host the
+mount holds only the tracked `epstein.db.gz`, which the entrypoint decompresses
+once. Keyword search works immediately; for semantic search either mount a DB
+that already has the `page_embeddings` table or set `RAG_BUILD_EMBEDDINGS=1`
+(builds the index on first start — needs Ollama, ~1h for the full corpus).
+
+Override models/origins with a `.env` beside the compose file:
+
+```bash
+RAG_MODEL=llama3.1:8b
+RAG_CORS_ORIGINS=https://eps.example.com
+RAG_BUILD_EMBEDDINGS=0
+```
+
+Point a front-end at the API with `NEXT_PUBLIC_RAG_API_URL=http://<host>:8000`
+and add that origin to `RAG_CORS_ORIGINS`.
+
+> **Note (macOS):** the Ollama *container* runs CPU-only under Docker Desktop —
+> fine for a Linux server (and GPU-capable there), but slow on a Mac. For local
+> dev on a Mac, prefer native `ollama serve` (uses the Apple GPU) with the API
+> run directly, as in section 4.
+
+### 6. Legacy pipeline (token extraction)
 
 ```bash
 python src/main.py --mode scan           # Full: OCR → tokenize → CSV
