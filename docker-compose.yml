@@ -1,0 +1,75 @@
+# RAG chat stack: free/open-source models via Ollama + the FastAPI RAG server.
+#
+#   docker compose up --build         # start Ollama + pull models + run the API
+#   curl localhost:8000/rag/health    # verify
+#
+# Point a front-end at http://<host>:8000 via NEXT_PUBLIC_RAG_API_URL, and set
+# RAG_CORS_ORIGINS below to that front-end's origin.
+#
+# Override models/host with a .env file next to this compose (RAG_MODEL, etc.).
+
+services:
+  # Open-source model server. Holds the chat + embedding models on a named
+  # volume so they survive restarts (no re-pull).
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-models:/root/.ollama
+    environment:
+      # Large enough context that long retrieval prompts aren't silently cut.
+      OLLAMA_CONTEXT_LENGTH: "16384"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  # One-shot: wait for ollama, pull the chat + embedding models, then exit.
+  # rag-api waits for this to complete successfully.
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        ollama pull ${RAG_MODEL:-qwen3:4b} &&
+        ollama pull ${RAG_EMBED_MODEL:-nomic-embed-text}
+    restart: "no"
+
+  # The conversational RAG API (SSE). Reads the SQLite corpus from the mounted
+  # data dir; the entrypoint decompresses epstein.db.gz there if no .db exists.
+  rag-api:
+    build: ./scan_manager
+    depends_on:
+      ollama-pull:
+        condition: service_completed_successfully
+    environment:
+      RAG_PROVIDER: openai
+      RAG_MODEL: ${RAG_MODEL:-qwen3:4b}
+      RAG_EMBED_MODEL: ${RAG_EMBED_MODEL:-nomic-embed-text}
+      RAG_BASE_URL: http://ollama:11434/v1
+      RAG_EMBED_URL: http://ollama:11434
+      RAG_DB_PATH: /app/data/epstein.db
+      OLLAMA_CONTEXT_LENGTH: "16384"
+      # Comma-separated browser origins allowed to call the API.
+      RAG_CORS_ORIGINS: ${RAG_CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      # Set to 1 to build the semantic index on first start (needs Ollama; ~1h
+      # for the full corpus). Keyword search works without it.
+      RAG_BUILD_EMBEDDINGS: ${RAG_BUILD_EMBEDDINGS:-0}
+    volumes:
+      # Provides the corpus. On a dev host this reuses the locally-built
+      # epstein.db (with embeddings); on a fresh host it holds only the tracked
+      # epstein.db.gz, which the entrypoint decompresses once.
+      - ./scan_manager/data:/app/data
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+volumes:
+  ollama-models:
