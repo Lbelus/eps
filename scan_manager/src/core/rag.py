@@ -6,12 +6,13 @@ pages inside matching documents, reads the page text, and answers with
 filename + page citations. Conversation history is kept for follow-ups.
 
 Two backends, selected with RAG_PROVIDER:
-  - "anthropic" (default): Claude via the Anthropic API
-  - "openai": any OpenAI-compatible server — Ollama, vLLM, LM Studio, etc.
+  - "openai" (default): any OpenAI-compatible server — Ollama, vLLM, LM Studio,
+    etc. This project runs on free, open-source models via Ollama by default.
+  - "anthropic": Claude via the paid Anthropic API (opt in with RAG_PROVIDER=anthropic)
 
 Environment variables:
-  RAG_PROVIDER   anthropic | openai
-  RAG_MODEL      model id (defaults: claude-opus-4-8 / qwen3:8b)
+  RAG_PROVIDER   openai | anthropic
+  RAG_MODEL      model id (defaults: qwen3:4b / claude-opus-4-8)
   RAG_BASE_URL   openai provider only (default http://localhost:11434/v1)
   RAG_API_KEY    openai provider only (default "ollama"; local servers ignore it)
 """
@@ -27,8 +28,8 @@ import requests
 from core import embeddings
 from core.database import init_db
 
-PROVIDER = os.environ.get("RAG_PROVIDER", "anthropic")
-MODEL = os.environ.get("RAG_MODEL") or ("claude-opus-4-8" if PROVIDER == "anthropic" else "qwen3:8b")
+PROVIDER = os.environ.get("RAG_PROVIDER", "openai")
+MODEL = os.environ.get("RAG_MODEL") or ("claude-opus-4-8" if PROVIDER == "anthropic" else "qwen3:4b")
 BASE_URL = os.environ.get("RAG_BASE_URL", "http://localhost:11434/v1")
 API_KEY = os.environ.get("RAG_API_KEY", "ollama")
 MAX_TOKENS = 16000
@@ -362,40 +363,87 @@ def _openai_tools() -> list[dict]:
     ]
 
 
+def _partial_tail(s: str, tag: str) -> int:
+    """Length of the longest suffix of `s` that is a proper prefix of `tag`.
+
+    Used to hold back a tag that may be split across streaming deltas (e.g. `s`
+    ends in "</thin" — don't emit it yet, the "k>" may arrive next).
+    """
+    for k in range(min(len(tag) - 1, len(s)), 0, -1):
+        if tag.startswith(s[-k:]):
+            return k
+    return 0
+
+
 class _ThinkFilter:
-    """Suppress inline <think>...</think> reasoning some open models stream."""
+    """Strip a model's reasoning from the streamed answer text.
+
+    Handles two shapes:
+      * an explicit ``<think>...</think>`` block anywhere in the stream, and
+      * a block auto-opened by the chat template (Ollama/qwen3 do this), where
+        only the closing ``</think>`` reaches us with no visible opener.
+
+    The second shape is why leading text must be withheld: reasoning that starts
+    the stream has no opener to mark it, so we hold everything until we either
+    see a ``</think>`` (the held text was reasoning — discard it) or the stream
+    ends (a model that never reasons — flush it as the answer). Callers MUST call
+    ``flush()`` once the stream is exhausted to release any held answer text.
+    """
+
+    _OPEN = "<think>"
+    _CLOSE = "</think>"
 
     def __init__(self):
         self._buffer = ""
         self._thinking = False
+        self._resolved = False  # settled whether the stream opened mid-reasoning?
 
     def feed(self, delta: str) -> str:
         self._buffer += delta
         out = []
         while self._buffer:
+            if not self._resolved:
+                close = self._buffer.find(self._CLOSE)
+                open_ = self._buffer.find(self._OPEN)
+                if close != -1 and (open_ == -1 or close < open_):
+                    # Orphan closer first: the leading text was reasoning. Drop it.
+                    self._buffer = self._buffer[close + len(self._CLOSE):]
+                    self._resolved = True
+                    continue
+                if open_ != -1:
+                    # Explicit opener present — hand off to the normal path below.
+                    self._resolved = True
+                    continue
+                # No tag yet; the buffer could still be leading reasoning. Hold it
+                # all (a split trailing tag stays buffered for the next delta).
+                break
             if self._thinking:
-                end = self._buffer.find("</think>")
+                end = self._buffer.find(self._CLOSE)
                 if end == -1:
-                    self._buffer = self._buffer[-8:]  # keep a partial-tag tail
+                    keep = _partial_tail(self._buffer, self._CLOSE)
+                    self._buffer = self._buffer[len(self._buffer) - keep:] if keep else ""
                     break
-                self._buffer = self._buffer[end + len("</think>"):]
+                self._buffer = self._buffer[end + len(self._CLOSE):]
                 self._thinking = False
             else:
-                start = self._buffer.find("<think>")
+                start = self._buffer.find(self._OPEN)
                 if start == -1:
-                    # Hold back a potential partial "<think" prefix at the end.
-                    safe = len(self._buffer)
-                    for k in range(1, min(len("<think>"), safe) + 1):
-                        if "<think>".startswith(self._buffer[safe - k:]):
-                            safe -= k
-                            break
+                    safe = len(self._buffer) - _partial_tail(self._buffer, self._OPEN)
                     out.append(self._buffer[:safe])
                     self._buffer = self._buffer[safe:]
                     break
                 out.append(self._buffer[:start])
-                self._buffer = self._buffer[start + len("<think>"):]
+                self._buffer = self._buffer[start + len(self._OPEN):]
                 self._thinking = True
         return "".join(out)
+
+    def flush(self) -> str:
+        """Release held text at stream end. Discards an unterminated think block."""
+        # Unresolved + not thinking → the stream had no think tags at all, so the
+        # held buffer was the answer. Otherwise we ended mid-reasoning: discard.
+        tail = self._buffer if (not self._resolved and not self._thinking) else ""
+        self._buffer = ""
+        return tail
 
 
 def _stream_turn_openai(client: "openai.OpenAI", conn: sqlite3.Connection, messages: list):
@@ -435,6 +483,12 @@ def _stream_turn_openai(client: "openai.OpenAI", conn: sqlite3.Connection, messa
                 if tc.function:
                     entry["name"] += tc.function.name or ""
                     entry["arguments"] += tc.function.arguments or ""
+
+        tail = think_filter.flush()  # release any answer text held past a think block
+        if tail:
+            content_parts.append(tail)
+            if not force_search:
+                yield {"type": "text", "text": tail}
 
         # Some servers (Ollama) treat tool_choice="required" as advisory —
         # enforce it here: throw away the ungrounded answer and demand

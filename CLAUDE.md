@@ -52,18 +52,19 @@ python src/main.py --mode search --query "grand jury"          # Full-text searc
 python src/main.py --mode search --query "flight logs" --limit 50
 
 # --- Conversational RAG (LLM over the FTS5 index) ---
-python src/main.py --mode chat                     # CLI chat REPL (default: Claude, needs ANTHROPIC_API_KEY)
+# Default backend is free/open-source Ollama (RAG_PROVIDER=openai, model qwen3:4b).
+# Requires ollama running: OLLAMA_CONTEXT_LENGTH=16384 ollama serve && ollama pull qwen3:4b
+python src/main.py --mode chat                     # CLI chat REPL (default: local Ollama)
 uvicorn --app-dir src api.rag_server:app --port 8000   # SSE API for the front_end rag-chat page
 
 # Semantic index (one-time, resumable; needs ollama + nomic-embed-text):
 python src/main.py --mode embed                    # embeds all pages -> page_embeddings table
 # Adds a semantic_search tool to the chat; env: RAG_EMBED_MODEL, RAG_EMBED_URL
 
-# Open-source model via any OpenAI-compatible server (Ollama, vLLM, LM Studio):
-#   ollama serve && ollama pull qwen3:8b
-#   RAG_PROVIDER=openai python src/main.py --mode chat
-#   RAG_PROVIDER=openai uvicorn --app-dir src api.rag_server:app --port 8000
-# Env vars: RAG_PROVIDER (anthropic|openai), RAG_MODEL (default qwen3:8b for openai),
+# Paid Claude backend (opt in — needs ANTHROPIC_API_KEY):
+#   RAG_PROVIDER=anthropic python src/main.py --mode chat
+#   RAG_PROVIDER=anthropic uvicorn --app-dir src api.rag_server:app --port 8000
+# Env vars: RAG_PROVIDER (openai|anthropic, default openai), RAG_MODEL (default qwen3:4b for openai),
 #           RAG_BASE_URL (default http://localhost:11434/v1), RAG_API_KEY,
 #           RAG_REASONING (default "none" — hidden reasoning dominates local latency),
 #           RAG_FORCE_SEARCH (default 1 — client-enforced search-before-answer),

@@ -53,8 +53,8 @@ playwright install chromium
 ```
 
 For the RAG chat, one of:
-- **Claude backend** (default): export `ANTHROPIC_API_KEY`
-- **Open-source backend**: [Ollama](https://ollama.com) — `brew install ollama`, then `ollama pull qwen3:8b`
+- **Open-source backend** (default): [Ollama](https://ollama.com) — `brew install ollama`, then `ollama pull qwen3:4b`. Free, fully local, no API key.
+- **Claude backend** (opt in with `RAG_PROVIDER=anthropic`): export `ANTHROPIC_API_KEY`
 
 For semantic search (optional): `ollama pull nomic-embed-text`
 
@@ -111,8 +111,8 @@ searches the index, locates and reads the relevant pages, and answers with
 questions work.
 
 ```bash
-python src/main.py --mode chat                          # CLI REPL (Claude backend)
-RAG_PROVIDER=openai python src/main.py --mode chat      # local model via Ollama
+python src/main.py --mode chat                          # CLI REPL (local Ollama, default)
+RAG_PROVIDER=anthropic python src/main.py --mode chat   # paid Claude backend (needs ANTHROPIC_API_KEY)
 
 # Web UI: start the SSE API, then the front_end dev server
 uvicorn --app-dir src api.rag_server:app --port 8000
@@ -140,8 +140,8 @@ Claude backend.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `RAG_PROVIDER` | `anthropic` | `anthropic` (Claude) or `openai` (any OpenAI-compatible server: Ollama, vLLM, LM Studio) |
-| `RAG_MODEL` | `claude-opus-4-8` / `qwen3:8b` | Model ID (default depends on provider) |
+| `RAG_PROVIDER` | `openai` | `openai` (any OpenAI-compatible server: Ollama, vLLM, LM Studio) or `anthropic` (paid Claude) |
+| `RAG_MODEL` | `qwen3:4b` / `claude-opus-4-8` | Model ID (default depends on provider) |
 | `RAG_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible server URL (`openai` provider) |
 | `RAG_API_KEY` | `ollama` | API key for that server (local servers ignore it) |
 | `RAG_REASONING` | `none` | Reasoning effort for open models (`none`/`low`/`medium`/`high`). Hidden reasoning dominates local latency — `none` is ~12x faster on qwen3:8b |

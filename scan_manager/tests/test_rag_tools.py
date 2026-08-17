@@ -96,9 +96,12 @@ class TestToolSchemas:
 
 
 class TestThinkFilter:
-    def test_passthrough(self):
+    def test_passthrough_released_on_flush(self):
+        # Leading plain text is withheld mid-stream (it might precede an orphan
+        # </think>) and released once the stream ends with no think block seen.
         f = _ThinkFilter()
-        assert f.feed("plain text") == "plain text"
+        assert f.feed("plain text") == ""
+        assert f.flush() == "plain text"
 
     def test_strips_think_block(self):
         f = _ThinkFilter()
@@ -109,6 +112,19 @@ class TestThinkFilter:
         out = "".join(f.feed(c) for c in ["a<thi", "nk>hid", "den</thi", "nk>b"])
         assert out == "ab"
 
-    def test_holds_back_partial_open_tag(self):
+    def test_strips_orphan_closing_tag(self):
+        # Template auto-opened the block, so only the closing </think> arrives.
         f = _ThinkFilter()
-        assert f.feed("hello <th") == "hello "
+        assert f.feed("hidden reasoning</think>visible") == "visible"
+
+    def test_streams_incrementally_after_close(self):
+        # Once the block closes, subsequent text streams delta-by-delta again.
+        f = _ThinkFilter()
+        f.feed("reasoning</think>")
+        assert f.feed("more ") == "more "
+        assert f.feed("text") == "text"
+
+    def test_discards_unterminated_reasoning_on_flush(self):
+        f = _ThinkFilter()
+        assert f.feed("<think>reasoning that never closes") == ""
+        assert f.flush() == ""

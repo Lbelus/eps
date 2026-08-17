@@ -113,6 +113,37 @@ def test_think_tags_stripped_from_stream_and_history(db):
     assert messages[-1]["content"] == "Answer."
 
 
+def test_orphan_closing_think_tag_stripped(db):
+    # Ollama/qwen3 chat templates auto-open the think block, so only the closing
+    # </think> reaches us with no visible opener — split across deltas here.
+    client = FakeClient([
+        [tool_chunk("search_documents", '{"query": "flight"}')],
+        [text_chunk("secret reasoning with no"), text_chunk(" opener</think>Real answer.")],
+    ])
+    messages = [{"role": "user", "content": "q"}]
+    events = run(client, db, messages)
+
+    streamed = "".join(e["text"] for e in events if e["type"] == "text")
+    assert streamed == "Real answer."
+    assert "reasoning" not in streamed
+    assert messages[-1]["content"] == "Real answer."
+
+
+def test_answer_without_any_think_tags_flushed(db):
+    # A model that emits no reasoning: the whole answer is withheld pending a
+    # possible orphan </think>, then released by flush() at stream end.
+    client = FakeClient([
+        [tool_chunk("search_documents", '{"query": "flight"}')],
+        [text_chunk("Plain "), text_chunk("answer.")],
+    ])
+    messages = [{"role": "user", "content": "q"}]
+    events = run(client, db, messages)
+
+    streamed = "".join(e["text"] for e in events if e["type"] == "text")
+    assert streamed == "Plain answer."
+    assert messages[-1]["content"] == "Plain answer."
+
+
 def test_invalid_tool_arguments_reported_not_crashed(db):
     client = FakeClient([
         [tool_chunk("search_documents", "not json at all")],
